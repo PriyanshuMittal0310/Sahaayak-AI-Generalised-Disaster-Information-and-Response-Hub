@@ -1,0 +1,21 @@
+[
+    {
+      "id": "reddit_001",
+      "subreddit": "india",
+      "author": "user_a",
+      "title": "Heavy rains near Hubballi",
+      "text": "Waterlogging reported around Gokul Road.",
+      "lat": 15.36,
+      "lon": 75.12
+    },
+    {
+      "id": "reddit_002",
+      "subreddit": "bangalore",
+      "author": "user_b",
+      "title": "Trees down after winds",
+      "text": "Koramangala 80 ft road blocked.",
+      "lat": 12.93,
+      "lon": 77.62
+    }
+  ]
+  

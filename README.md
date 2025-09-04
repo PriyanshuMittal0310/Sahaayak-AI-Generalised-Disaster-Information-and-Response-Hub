@@ -1,43 +1,42 @@
-# 🌍 Sahaayak AI: Real-time Earthquake Monitor
+# 🌍 Sahaayak AI: Earthquake Monitoring System
 
-A real-time earthquake monitoring system with a React frontend and FastAPI backend that fetches and visualizes live earthquake data from the USGS (United States Geological Survey) feed. The application provides an interactive map with real-time updates of seismic activity worldwide.
+A real-time earthquake monitoring platform with a React frontend and FastAPI backend that visualizes seismic data from USGS. The application provides an interactive map with real-time earthquake updates and allows users to submit incident reports.
 
 ## 🌟 Features
 
 ### Backend (FastAPI)
-- 🌍 **Real-time earthquake data** from USGS feed
-- 🔍 **Magnitude filtering** to focus on significant earthquakes
+- 🌍 **Real-time earthquake data** from USGS
+- 📍 **Location-based incident reporting**
 - 🏥 **Health monitoring** with built-in health check endpoint
 - 🐳 **Docker support** for easy deployment
-- 📊 **Comprehensive data** including location, magnitude, time, and alerts
+- 📊 **Comprehensive data** including location, magnitude, and time
 - 🔄 **Auto-reload** development server
 
 ### Frontend (React)
 - 🗺️ **Interactive map** using React Leaflet
 - 📱 **Responsive design** for all device sizes
 - ⚡ **Real-time updates** every minute
-- 📍 **Color-coded markers** based on earthquake magnitude
-  - 🟢 Minor (<4.0)
-  - 🟡 Moderate (4.0-4.9)
-  🟠 Strong (5.0-5.9)
-  🔴 Major (6.0+)
-- 💬 **Informative popups** with detailed earthquake information
+- 📍 **Color-coded markers** for different data sources
+- 📝 **Incident reporting** with photo uploads
+- 🔄 **Manual refresh** capability
+- 💬 **Rich popups** with detailed disaster information
+- 🔍 **Advanced filtering** by disaster type, date, and severity
 - 🕒 **Auto-refreshing** data without page reload
 - 🌐 **Responsive layout** for all screen sizes
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Docker and Docker Compose
-- Node.js 18+ (for local frontend development)
-- Python 3.8+ (for local backend development)
+- Docker and Docker Compose installed
+- Node.js 16+ (for frontend development)
+- Python 3.9+ (for backend development)
 
 ### Using Docker (Recommended)
 
 1. **Clone and navigate to the project**
    ```bash
    git clone https://github.com/yourusername/sahaayak-ai.git
-   cd Sahaayak-AI
+   cd sahaayak-ai
    ```
 
 2. **Start all services**
@@ -51,7 +50,7 @@ A real-time earthquake monitoring system with a React frontend and FastAPI backe
    - API Documentation: http://localhost:8000/docs
    - Health check: http://localhost:8000/health
 
-## 🛠️ Development
+## 🔧 Development
 
 ### Backend Development
 
@@ -63,9 +62,9 @@ A real-time earthquake monitoring system with a React frontend and FastAPI backe
    pip install -r requirements.txt
    ```
 
-2. **Run the FastAPI server**
+2. **Run the development server**
    ```bash
-   uvicorn main:app --reload
+   uvicorn main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 ### Frontend Development
@@ -81,36 +80,47 @@ A real-time earthquake monitoring system with a React frontend and FastAPI backe
    npm start
    ```
 
-## 📚 API Endpoints
+## 📝 API Endpoints
 
-| Endpoint | Method | Description | Parameters |
-|----------|--------|-------------|------------|
-| `/` | GET | Welcome message | None |
-| `/health` | GET | Health check status | None |
-| `/realtime/earthquakes` | GET | Live earthquake events | None |
+### Data Ingestion
+- `GET /ingest/usgs` - Fetch latest earthquake data from USGS
+- `POST /ingest/citizen-report` - Submit a new incident report (multipart form)
+  - Parameters: `text`, `lat`, `lon`, `file` (optional)
+
+### Data Retrieval
+- `GET /api/items` - Get all items (earthquakes and reports)
+- `GET /ingest/load-sample` - Load sample data (development only)
+
+### Health Check
+- `GET /health` - Service health status
+
+### Static Files
+- `GET /uploads/{filename}` - Access uploaded files
 
 ## 🏗️ Project Structure
 
 ```
-Sahaayak-AI/
-├── backend/
-│   ├── main.py              # FastAPI application
-│   ├── fetch_usgs.py        # USGS data fetcher
-│   ├── models.py            # Database models
-│   ├── db.py                # Database connection
-│   ├── requirements.txt     # Python dependencies
-│   └── Dockerfile           # Backend container config
-├── frontend/
-│   ├── public/              # Static files
-│   ├── src/                 # React source code
-│   │   ├── components/      # Reusable components
-│   │   ├── App.jsx          # Main App component
-│   │   └── index.js         # Entry point
-│   ├── package.json         # Frontend dependencies
-│   └── Dockerfile           # Frontend container config
-├── docker-compose.yml       # Docker Compose setup
-└── README.md               # This file
+sahaayak-ai/
+├── backend/               # FastAPI application
+│   ├── main.py           # Main application file
+│   ├── models.py         # Database models
+│   ├── db.py             # Database configuration
+│   ├── fetch_usgs.py     # USGS data fetcher
+│   ├── seeds/            # Sample data
+│   └── requirements.txt  # Python dependencies
+├── frontend/             # React application
+│   ├── public/           # Static files
+│   ├── src/              # React components
+│   │   ├── app.jsx       # Main application component
+│   │   └── ...
+│   └── package.json      # Frontend dependencies
+├── docker-compose.yml    # Multi-container setup
+└── README.md            # This file
 ```
+
+## 📝 Data Source
+- **USGS**: Real-time earthquake data from the United States Geological Survey
+- **Citizen Reports**: User-submitted incident reports with location and details
 
 ## 📝 Usage Examples
 
@@ -164,11 +174,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - USGS for providing the earthquake data
 - FastAPI and React communities for amazing tools
 - All contributors who helped improve this project
-
-This application fetches earthquake data from the USGS Earthquake Hazards Program:
-- **Feed URL**: https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson
-- **Update frequency**: Real-time (updated every minute)
-- **Coverage**: Worldwide earthquakes from the past hour
 
 ## Docker Commands
 

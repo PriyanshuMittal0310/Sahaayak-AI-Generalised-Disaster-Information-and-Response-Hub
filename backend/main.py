@@ -1,64 +1,213 @@
-from fastapi import FastAPI, Depends
+import os, uuid, json
+from typing import Optional, List
+from fastapi import FastAPI, Depends, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from loguru import logger
-from fastapi.middleware.cors import CORSMiddleware
 
 from db import Base, engine, get_db
 from models import Item
 from fetch_usgs import fetch_usgs_quakes
 
-# Ensure tables exist
+# --- setup & CORS ---
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="CrisisConnect API", version="0.3")
+app = FastAPI(title="CrisisConnect API", version="0.4")
 
-# Allow frontend React app (http://localhost:3000) to call API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # in production, restrict domains
+    allow_origins=["*"],   # tighten in prod
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# static uploads
+UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
 @app.on_event("startup")
 def startup_event():
     logger.info("🚀 CrisisConnect backend started")
 
+# --- health ---
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
-@app.get("/realtime/earthquakes")
-def realtime_quakes(db: Session = Depends(get_db)):
-    """
-    Fetch and return real-time earthquake data from USGS
-    
-    Returns:
-        JSON response with earthquake events
-    """
-    events = fetch_usgs_quakes()
-    
-    if events is None:
-        return {"error": "Failed to fetch earthquake data"}, 500
+# --- pullers: USGS ---
+@app.get("/ingest/usgs")
+def ingest_usgs(db: Session = Depends(get_db)):
+    try:
+        data = fetch_usgs_quakes()
+        new_count = 0
+        events = []
         
-    # Store new events in the database
-    for event in events:
-        if not event.get('id'):
-            continue
+        for e in data:
+            ext_id = e.get("id")
+            if not ext_id:
+                continue
+                
+            # Check if this earthquake already exists
+            exists = db.query(Item).filter(Item.ext_id == ext_id, Item.source == "USGS").first()
+            lon, lat, depth = (e.get("coordinates") or [None, None, None]) + [None] * (3 - len(e.get("coordinates") or []))
             
-        exists = db.query(Item).filter(Item.id == event["id"]).first()
-        if not exists:
-            item = Item(
-                id=event["id"],
-                source="USGS",
-                text=event.get("place", ""),
-                magnitude=event.get("magnitude"),
-                place=event.get("place", ""),
-            )
-            db.add(item)
-            db.commit()
-            db.refresh(item)
-    
-    # Return the events data
-    return {"count": len(events), "events": events}
+            event_data = {
+                "id": ext_id,
+                "place": e.get("place"),
+                "magnitude": e.get("magnitude"),
+                "time_utc": e.get("time_utc"),
+                "url": e.get("url"),
+                "coordinates": [lon, lat, depth],
+                "raw": e.get("raw", {})
+            }
+            events.append(event_data)
+            
+            if not exists and lat is not None and lon is not None:
+                # Only add to database if it's new and has coordinates
+                db.add(Item(
+                    ext_id=ext_id,
+                    source="USGS",
+                    source_handle="USGS",
+                    text=e.get("place"),
+                    magnitude=e.get("magnitude"),
+                    place=e.get("place"),
+                    lat=lat,
+                    lon=lon,
+                    raw_json=event_data,
+                ))
+                new_count += 1
+                
+        db.commit()
+        return {
+            "inserted": new_count,
+            "fetched": len(events),
+            "events": events  # Return the events for the frontend
+        }
+    except Exception as e:
+        logger.error(f"Error in USGS ingestion: {str(e)}")
+        return {"error": str(e), "inserted": 0, "fetched": 0, "events": []}
+
+# --- stubs: Reddit & X (use seeds if no API keys yet) ---
+def _load_seed(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Seed load failed: {e}")
+        return []
+
+@app.get("/ingest/seed/reddit")
+def ingest_seed_reddit(db: Session = Depends(get_db)):
+    seed = _load_seed(os.path.join(os.getcwd(), "seeds", "reddit_seed.json"))
+    new = 0
+    for s in seed:
+        ext_id = s.get("id")
+        if not ext_id:
+            continue
+        exists = db.query(Item).filter(Item.ext_id == ext_id, Item.source == "REDDIT").first()
+        if exists:
+            continue
+        db.add(Item(
+            ext_id=ext_id,
+            source="REDDIT",
+            source_handle=s.get("subreddit"),
+            text=(s.get("title") or "") + " - " + (s.get("text") or ""),
+            place=None,
+            lat=s.get("lat"),
+            lon=s.get("lon"),
+            raw_json=s
+        ))
+        new += 1
+    db.commit()
+    return {"inserted": new, "fetched": len(seed)}
+
+@app.get("/ingest/seed/x")
+def ingest_seed_x(db: Session = Depends(get_db)):
+    seed = _load_seed(os.path.join(os.getcwd(), "seeds", "x_seed.json"))
+    new = 0
+    for s in seed:
+        ext_id = s.get("id")
+        if not ext_id:
+            continue
+        exists = db.query(Item).filter(Item.ext_id == ext_id, Item.source == "X").first()
+        if exists:
+            continue
+        db.add(Item(
+            ext_id=ext_id,
+            source="X",
+            source_handle=s.get("handle"),
+            text=s.get("text"),
+            place=None,
+            lat=s.get("lat"),
+            lon=s.get("lon"),
+            raw_json=s
+        ))
+        new += 1
+    db.commit()
+    return {"inserted": new, "fetched": len(seed)}
+
+# --- citizen web form ingest (multipart) ---
+@app.post("/api/ingest")
+async def ingest_citizen(
+    text: str = Form(...),
+    lat: Optional[float] = Form(None),
+    lon: Optional[float] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db)
+):
+    media_url = None
+    if file:
+        # naive file validation (content-type startswith image/)
+        if not (file.content_type or "").startswith("image/"):
+            return {"ok": False, "error": "Only image uploads supported for now."}
+        ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+        fname = f"{uuid.uuid4().hex}{ext}"
+        fpath = os.path.join(UPLOAD_DIR, fname)
+        with open(fpath, "wb") as out:
+            out.write(await file.read())
+        media_url = f"/uploads/{fname}"
+
+    item = Item(
+        ext_id=str(uuid.uuid4()),
+        source="CITIZEN",
+        source_handle="web_form",
+        text=text[:4000],
+        lat=lat,
+        lon=lon,
+        media_url=media_url,
+        raw_json={"text": text, "lat": lat, "lon": lon, "media_url": media_url}
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {"ok": True, "id": item.id, "media_url": media_url}
+
+# --- list items for map ---
+@app.get("/api/items")
+def list_items(db: Session = Depends(get_db)):
+    rows = db.query(Item).order_by(Item.created_at.desc()).limit(500).all()
+    def to_dict(r: Item):
+        return {
+            "id": r.id,
+            "ext_id": r.ext_id,
+            "source": r.source,
+            "source_handle": r.source_handle,
+            "text": r.text,
+            "place": r.place,
+            "magnitude": r.magnitude,
+            "lat": r.lat,
+            "lon": r.lon,
+            "media_url": r.media_url,
+            "created_at": r.created_at.isoformat() if r.created_at else None
+        }
+    return {"count": len(rows), "items": [to_dict(r) for r in rows]}
+
+# --- convenience loader: try to reach 50+ items ---
+@app.get("/ingest/sample")
+def load_sample(db: Session = Depends(get_db)):
+    # Load USGS data
+    usgs = ingest_usgs(db)
+    return {"status": "ok", "total_items": db.query(Item).count()}

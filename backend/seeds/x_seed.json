@@ -1,0 +1,17 @@
+[
+    {
+      "id": "x_001",
+      "handle": "@alerts_blr",
+      "text": "Fire near Hosur Road industrial area. Avoid.",
+      "lat": 12.86,
+      "lon": 77.66
+    },
+    {
+      "id": "x_002",
+      "handle": "@flood_watch",
+      "text": "Local stream overflowing near Dharwad outskirts.",
+      "lat": 15.47,
+      "lon": 75.00
+    }
+  ]
+  
