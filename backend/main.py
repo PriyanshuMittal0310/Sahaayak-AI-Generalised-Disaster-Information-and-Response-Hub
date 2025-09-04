@@ -37,6 +37,10 @@ def startup_event():
 def health_check():
     return {"status": "ok"}
 
+@app.get("/status")
+def status_check():
+    return {"status": "ok"}
+
 # --- pullers: USGS ---
 @app.get("/ingest/usgs")
 def ingest_usgs(db: Session = Depends(get_db)):
