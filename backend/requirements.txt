@@ -20,3 +20,9 @@ lxml>=4.9.0
 rq>=1.11.0
 rq-scheduler>=0.14.0
 
+# NLP and Geocoding dependencies
+spacy>=3.6.0
+langdetect>=1.0.9
+openai>=1.0.0
+nltk>=3.8.0
+shapely>=2.0.0
