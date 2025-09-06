@@ -128,7 +128,8 @@ export default function App() {
   const centerIndia = [20.59, 78.96];
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
-  const fetchData = async () => {
+  const fetchData = async (retryCount = 0) => {
+    const MAX_RETRIES = 3;
     try {
       setLoading(true);
       setError(null);
@@ -152,22 +153,40 @@ export default function App() {
       }
       console.log('USGS data fetched successfully');
       
-      // Fetch all items
-      console.log('Fetching items...');
-      const itemsRes = await fetch(`${API_URL}/api/items`);
-      if (!itemsRes.ok) {
-        const itemsError = await itemsRes.text();
-        console.error('Items fetch error:', itemsError);
-        throw new Error(`Failed to fetch items: ${itemsRes.status}`);
+      // Fetch all items with retry logic
+      let itemsRes;
+      let itemsData;
+      
+      try {
+        console.log('Fetching items...');
+        itemsRes = await fetch(`${API_URL}/api/items`);
+        if (!itemsRes.ok) {
+          throw new Error(`Failed to fetch items: ${itemsRes.status} ${itemsRes.statusText}`);
+        }
+        itemsData = await itemsRes.json();
+      } catch (fetchError) {
+        if (retryCount < MAX_RETRIES) {
+          console.log(`Retrying fetch (${retryCount + 1}/${MAX_RETRIES})...`);
+          // Wait for 1 second before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return fetchData(retryCount + 1);
+        }
+        throw fetchError;
       }
       
-      const itemsData = await itemsRes.json();
-      console.log('Items fetched successfully:', itemsData.count, 'items');
-      setItems(itemsData.items || []);
+      if (itemsData && itemsData.items) {
+        console.log('Items fetched successfully:', itemsData.count, 'items');
+        setItems(itemsData.items);
+      } else {
+        console.warn('Unexpected API response format:', itemsData);
+        setItems([]);
+      }
       
     } catch (error) {
       console.error('Error fetching data:', error);
       setError(`Connection failed: ${error.message}. Please ensure the backend is running on ${API_URL}`);
+      // Show error in the UI for 5 seconds
+      setTimeout(() => setError(null), 5000);
     } finally {
       setLoading(false);
     }
