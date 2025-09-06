@@ -421,13 +421,18 @@ export default function App() {
         <div style={{ position: 'relative', height: '100%' }}>
           <MapContainer 
             center={centerIndia} 
-            zoom={5} 
+            zoom={5}
+            minZoom={2}
             style={{ height: "100%", width: "100%" }}
             zoomControl={false}
+            worldCopyJump={false}
+            maxBounds={[[-85, -180], [85, 180]]}
+            maxBoundsViscosity={1.0}
           >
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              noWrap={true}
             />
             
             {/* Legend */}

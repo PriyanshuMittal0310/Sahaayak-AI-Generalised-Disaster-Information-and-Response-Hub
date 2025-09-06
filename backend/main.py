@@ -9,6 +9,8 @@ from loguru import logger
 from db import Base, engine, get_db
 from models import Item
 from fetch_usgs import fetch_usgs_quakes
+from services.nlp_service import nlp_service
+from services.geocoding_service import geocoding_service
 
 # --- setup & CORS ---
 Base.metadata.create_all(bind=engine)
@@ -27,6 +29,47 @@ app.add_middleware(
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+def process_item_with_nlp_geocoding(item: Item, text: str) -> Item:
+    """Process an item with NLP and geocoding services"""
+    if not text:
+        return item
+    
+    # Process text with NLP
+    nlp_result = nlp_service.process_text(text)
+    
+    # Update item with NLP results
+    item.language = nlp_result.get('language')
+    item.disaster_type = nlp_result.get('disaster_type')
+    
+    # If we don't have coordinates, try to geocode from extracted locations
+    if not item.lat or not item.lon:
+        locations = nlp_result.get('locations', [])
+        if locations:
+            # Extract location texts
+            location_texts = [loc.get('text', '') for loc in locations if loc.get('text')]
+            
+            # Add the place field if available
+            if item.place:
+                location_texts.insert(0, item.place)
+            
+            # Process locations with geocoding
+            geocoding_result = geocoding_service.process_locations(location_texts)
+            
+            if geocoding_result:
+                item.lat = geocoding_result.get('lat')
+                item.lon = geocoding_result.get('lon')
+                # Store geometry as WKT string for PostGIS
+                geom_wkt = geocoding_result.get('geometry')
+                if geom_wkt:
+                    # We'll update the geom field via raw SQL in the database
+                    pass
+                
+                # Update place with formatted address if we got one
+                if not item.place and geocoding_result.get('formatted_address'):
+                    item.place = geocoding_result.get('formatted_address')
+    
+    return item
 
 @app.on_event("startup")
 def startup_event():
@@ -71,7 +114,7 @@ def ingest_usgs(db: Session = Depends(get_db)):
             
             if not exists and lat is not None and lon is not None:
                 # Only add to database if it's new and has coordinates
-                db.add(Item(
+                item = Item(
                     ext_id=ext_id,
                     source="USGS",
                     source_handle="USGS",
@@ -81,7 +124,12 @@ def ingest_usgs(db: Session = Depends(get_db)):
                     lat=lat,
                     lon=lon,
                     raw_json=event_data,
-                ))
+                )
+                
+                # Process with NLP and geocoding
+                item = process_item_with_nlp_geocoding(item, e.get("place", ""))
+                
+                db.add(item)
                 new_count += 1
                 
         db.commit()
@@ -114,7 +162,7 @@ def ingest_seed_reddit(db: Session = Depends(get_db)):
         exists = db.query(Item).filter(Item.ext_id == ext_id, Item.source == "REDDIT").first()
         if exists:
             continue
-        db.add(Item(
+        item = Item(
             ext_id=ext_id,
             source="REDDIT",
             source_handle=s.get("subreddit"),
@@ -123,7 +171,12 @@ def ingest_seed_reddit(db: Session = Depends(get_db)):
             lat=s.get("lat"),
             lon=s.get("lon"),
             raw_json=s
-        ))
+        )
+        
+        # Process with NLP and geocoding
+        item = process_item_with_nlp_geocoding(item, item.text)
+        
+        db.add(item)
         new += 1
     db.commit()
     return {"inserted": new, "fetched": len(seed)}
@@ -139,7 +192,7 @@ def ingest_seed_x(db: Session = Depends(get_db)):
         exists = db.query(Item).filter(Item.ext_id == ext_id, Item.source == "X").first()
         if exists:
             continue
-        db.add(Item(
+        item = Item(
             ext_id=ext_id,
             source="X",
             source_handle=s.get("handle"),
@@ -148,7 +201,12 @@ def ingest_seed_x(db: Session = Depends(get_db)):
             lat=s.get("lat"),
             lon=s.get("lon"),
             raw_json=s
-        ))
+        )
+        
+        # Process with NLP and geocoding
+        item = process_item_with_nlp_geocoding(item, item.text)
+        
+        db.add(item)
         new += 1
     db.commit()
     return {"inserted": new, "fetched": len(seed)}
@@ -184,6 +242,10 @@ async def ingest_citizen(
         media_url=media_url,
         raw_json={"text": text, "lat": lat, "lon": lon, "media_url": media_url}
     )
+    
+    # Process with NLP and geocoding
+    item = process_item_with_nlp_geocoding(item, text)
+    
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -205,9 +267,50 @@ def list_items(db: Session = Depends(get_db)):
             "lat": r.lat,
             "lon": r.lon,
             "media_url": r.media_url,
+            "language": r.language,
+            "disaster_type": r.disaster_type,
             "created_at": r.created_at.isoformat() if r.created_at else None
         }
     return {"count": len(rows), "items": [to_dict(r) for r in rows]}
+
+# --- process existing items with NLP and geocoding ---
+@app.post("/api/process-nlp-geocoding")
+def process_existing_items(db: Session = Depends(get_db)):
+    """Process existing items that don't have NLP or geocoding data"""
+    try:
+        # Find items without language or disaster_type
+        items_to_process = db.query(Item).filter(
+            (Item.language.is_(None)) | (Item.disaster_type.is_(None))
+        ).limit(100).all()  # Process in batches
+        
+        processed_count = 0
+        for item in items_to_process:
+            if item.text:
+                # Process with NLP and geocoding
+                processed_item = process_item_with_nlp_geocoding(item, item.text)
+                
+                # Update the item in the database
+                item.language = processed_item.language
+                item.disaster_type = processed_item.disaster_type
+                if processed_item.lat and not item.lat:
+                    item.lat = processed_item.lat
+                if processed_item.lon and not item.lon:
+                    item.lon = processed_item.lon
+                if processed_item.place and not item.place:
+                    item.place = processed_item.place
+                
+                processed_count += 1
+        
+        db.commit()
+        
+        return {
+            "status": "ok",
+            "processed_count": processed_count,
+            "total_items": db.query(Item).count()
+        }
+    except Exception as e:
+        logger.error(f"Error processing items: {str(e)}")
+        return {"error": str(e), "processed_count": 0}
 
 # --- convenience loader: try to reach 50+ items ---
 @app.get("/ingest/sample")

@@ -16,6 +16,11 @@ class Item(Base):
     lon = Column(Float, nullable=True)
     media_url = Column(String, nullable=True)           # /uploads/filename.jpg
     raw_json = Column(JSON, nullable=True)
+    
+    # NLP and Geocoding fields
+    language = Column(String, nullable=True)            # detected language code (e.g., 'en', 'es')
+    disaster_type = Column(String, nullable=True)       # classified disaster type
+    # Note: geom field will be added via migration for PostGIS support
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (UniqueConstraint('ext_id', 'source', name='uq_ext_source'),)
