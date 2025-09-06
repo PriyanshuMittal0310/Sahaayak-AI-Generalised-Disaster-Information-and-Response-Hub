@@ -121,24 +121,50 @@ export default function App() {
   const centerIndia = [20.59, 78.96];
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
-  const fetchData = async () => {
+  const fetchData = async (retryCount = 0) => {
+    const MAX_RETRIES = 3;
     try {
       setLoading(true);
+      setError(null);
       
       // Fetch USGS data
       const usgsRes = await fetch(`${API_URL}/ingest/usgs`);
-      if (!usgsRes.ok) throw new Error('Failed to fetch USGS data');
+      if (!usgsRes.ok) {
+        throw new Error(`Failed to fetch USGS data: ${usgsRes.status} ${usgsRes.statusText}`);
+      }
       
-      // Fetch all items
-      const itemsRes = await fetch(`${API_URL}/api/items`);
-      if (!itemsRes.ok) throw new Error('Failed to fetch items');
+      // Fetch all items with retry logic
+      let itemsRes;
+      let itemsData;
       
-      const itemsData = await itemsRes.json();
-      setItems(itemsData.items || []);
+      try {
+        itemsRes = await fetch(`${API_URL}/api/items`);
+        if (!itemsRes.ok) {
+          throw new Error(`Failed to fetch items: ${itemsRes.status} ${itemsRes.statusText}`);
+        }
+        itemsData = await itemsRes.json();
+      } catch (fetchError) {
+        if (retryCount < MAX_RETRIES) {
+          console.log(`Retrying fetch (${retryCount + 1}/${MAX_RETRIES})...`);
+          // Wait for 1 second before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return fetchData(retryCount + 1);
+        }
+        throw fetchError;
+      }
+      
+      if (itemsData && itemsData.items) {
+        setItems(itemsData.items);
+      } else {
+        console.warn('Unexpected API response format:', itemsData);
+        setItems([]);
+      }
       
     } catch (error) {
-      console.error('Error fetching data:', error);
-      setError(error.message);
+      console.error('Error in fetchData:', error);
+      setError(`Error: ${error.message}. Please try refreshing the page.`);
+      // Show error in the UI for 5 seconds
+      setTimeout(() => setError(null), 5000);
     } finally {
       setLoading(false);
     }

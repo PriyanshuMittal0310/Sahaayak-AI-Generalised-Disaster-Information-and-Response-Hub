@@ -17,12 +17,27 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="CrisisConnect API", version="0.4")
 
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten in prod
+    allow_origins=[
+        "http://localhost:3000",  # Local development
+        "http://127.0.0.1:3000",  # Alternative localhost
+        "http://localhost:8000",  # Local API
+        "http://127.0.0.1:8000",  # Alternative local API
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+    allow_headers=[
+        "Accept",
+        "Accept-Encoding",
+        "Authorization",
+        "Content-Type",
+        "Origin",
+        "X-Requested-With",
+    ],
+    expose_headers=["Content-Length", "X-Total-Count"],
+    max_age=600,  # Cache preflight requests for 10 minutes
 )
 
 # static uploads
