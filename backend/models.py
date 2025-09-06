@@ -22,5 +22,11 @@ class Item(Base):
     disaster_type = Column(String, nullable=True)       # classified disaster type
     # Note: geom field will be added via migration for PostGIS support
 
+    # Credibility fields
+    score_credibility = Column(Float, nullable=True)    # credibility score (0.0-1.0)
+    needs_review = Column(String, nullable=True)        # 'true' | 'false' | null
+    suspected_rumor = Column(String, nullable=True)     # 'true' | 'false' | null
+    credibility_signals = Column(JSON, nullable=True)   # store credibility signals and weights
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (UniqueConstraint('ext_id', 'source', name='uq_ext_source'),)
