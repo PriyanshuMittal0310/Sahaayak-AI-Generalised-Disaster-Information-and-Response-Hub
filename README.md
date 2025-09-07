@@ -6,13 +6,13 @@ A comprehensive real-time disaster monitoring platform with a React frontend and
 
 ### Backend (FastAPI)
 - 🌍 **Real-time disaster data** from multiple sources (USGS, GDACS, ReliefWeb, RSS feeds)
+- 🗄️ **PostgreSQL with PostGIS** for spatial data processing and storage
+- 🔄 **Alembic** for database migrations
 - 🤖 **AI-Powered NLP Processing** with language detection and disaster type classification
 - 📍 **Intelligent Geocoding** with automatic location extraction and coordinate mapping
 - 📊 **Comprehensive data** including location, magnitude, severity, and time
 - 🏥 **Health monitoring** with built-in health check endpoint
 - 🐳 **Docker support** for easy deployment
-- 🔄 **Auto-reload** development server
-- 🗄️ **PostgreSQL with PostGIS** for spatial data processing
 - ⚡ **Redis caching** for improved performance
 
 ### Frontend (React)
@@ -46,8 +46,8 @@ A comprehensive real-time disaster monitoring platform with a React frontend and
 
 1. **Clone and navigate to the project**
    ```bash
-   git clone https://github.com/yourusername/sahaayak-ai.git
-   cd sahaayak-ai
+   git clone https://github.com/PriyanshuMittal0310/Sahaayak-AI-Generalised-Disaster-Information-and-Response-Hub.git
+   cd Sahaayak-AI-Generalised-Disaster-Information-and-Response-Hub
    ```
 
 2. **Start all services**
@@ -55,7 +55,17 @@ A comprehensive real-time disaster monitoring platform with a React frontend and
    docker-compose up -d --build
    ```
 
-3. **Access the application**
+3. **Initialize the database**
+   ```bash
+   # Apply database migrations
+   docker-compose exec sahaayak-backend alembic upgrade head
+   
+   # Verify the database state
+   docker-compose exec sahaayak-backend alembic current
+   ```
+   You should see output indicating the latest migration is applied.
+
+4. **Access the application**
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:8000
    - API Documentation: http://localhost:8000/docs

@@ -83,7 +83,7 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
       - NODE_ENV=development
-      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_API_URL=http://localhost:8000  # Use localhost for browser access
     volumes:
       - ./frontend:/app
       - /app/node_modules

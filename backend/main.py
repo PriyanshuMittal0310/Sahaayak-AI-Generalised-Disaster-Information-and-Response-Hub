@@ -9,6 +9,7 @@ from loguru import logger
 from db import Base, engine, get_db
 from models import Item
 from fetch_usgs import fetch_usgs_quakes
+from ingest import ingest_rss_to_db
 from services.nlp_service import nlp_service
 from services.geocoding_service import geocoding_service
 from services.credibility_service import credibility_service
@@ -18,18 +19,10 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="CrisisConnect API", version="0.4")
 
-# Configure CORS
+# Configure CORS to allow all origins for development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Local development
-        "http://127.0.0.1:3000",  # Alternative localhost
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-        "http://localhost:8000",  # Local API
-        "http://127.0.0.1:8000",  # Alternative local API
-        "*"  # Allow all origins for development
-    ],
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=[
@@ -471,5 +464,19 @@ def credibility_stats(db: Session = Depends(get_db)):
 @app.get("/ingest/sample")
 def load_sample(db: Session = Depends(get_db)):
     # Load USGS data
-    usgs = ingest_usgs(db)
-    return {"status": "ok", "total_items": db.query(Item).count()}
+    usgs_count = ingest_usgs(db)
+    logger.info(f"Loaded {usgs_count} items from USGS")
+    
+    # Load GDACS RSS data
+    gdacs_count = ingest_rss_to_db(db)
+    logger.info(f"Loaded {gdacs_count} items from GDACS")
+    
+    total_items = db.query(Item).count()
+    logger.info(f"Total items in database: {total_items}")
+    
+    return {
+        "status": "ok", 
+        "usgs_items": usgs_count,
+        "gdacs_items": gdacs_count,
+        "total_items": total_items
+    }
