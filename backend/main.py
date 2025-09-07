@@ -11,6 +11,7 @@ from models import Item
 from fetch_usgs import fetch_usgs_quakes
 from services.nlp_service import nlp_service
 from services.geocoding_service import geocoding_service
+from services.credibility_service import credibility_service
 
 # --- setup & CORS ---
 Base.metadata.create_all(bind=engine)
@@ -23,8 +24,11 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",  # Local development
         "http://127.0.0.1:3000",  # Alternative localhost
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
         "http://localhost:8000",  # Local API
         "http://127.0.0.1:8000",  # Alternative local API
+        "*"  # Allow all origins for development
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
@@ -35,6 +39,7 @@ app.add_middleware(
         "Content-Type",
         "Origin",
         "X-Requested-With",
+        "*"
     ],
     expose_headers=["Content-Length", "X-Total-Count"],
     max_age=600,  # Cache preflight requests for 10 minutes
@@ -86,6 +91,10 @@ def process_item_with_nlp_geocoding(item: Item, text: str) -> Item:
     
     return item
 
+def process_item_with_credibility(item: Item, db: Session) -> Item:
+    """Process an item with credibility scoring"""
+    return credibility_service.process_item_credibility(item, db)
+
 @app.on_event("startup")
 def startup_event():
     logger.info("🚀 CrisisConnect backend started")
@@ -93,11 +102,20 @@ def startup_event():
 # --- health ---
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    return {"status": "ok", "message": "CrisisConnect API is running"}
 
 @app.get("/status")
 def status_check():
-    return {"status": "ok"}
+    return {"status": "ok", "message": "CrisisConnect API is running"}
+
+@app.get("/")
+def root():
+    return {
+        "message": "CrisisConnect API", 
+        "version": "0.4",
+        "docs": "/docs",
+        "health": "/health"
+    }
 
 # --- pullers: USGS ---
 @app.get("/ingest/usgs")
@@ -143,6 +161,9 @@ def ingest_usgs(db: Session = Depends(get_db)):
                 
                 # Process with NLP and geocoding
                 item = process_item_with_nlp_geocoding(item, e.get("place", ""))
+                
+                # Process with credibility scoring
+                item = process_item_with_credibility(item, db)
                 
                 db.add(item)
                 new_count += 1
@@ -191,6 +212,9 @@ def ingest_seed_reddit(db: Session = Depends(get_db)):
         # Process with NLP and geocoding
         item = process_item_with_nlp_geocoding(item, item.text)
         
+        # Process with credibility scoring
+        item = process_item_with_credibility(item, db)
+        
         db.add(item)
         new += 1
     db.commit()
@@ -220,6 +244,9 @@ def ingest_seed_x(db: Session = Depends(get_db)):
         
         # Process with NLP and geocoding
         item = process_item_with_nlp_geocoding(item, item.text)
+        
+        # Process with credibility scoring
+        item = process_item_with_credibility(item, db)
         
         db.add(item)
         new += 1
@@ -261,6 +288,9 @@ async def ingest_citizen(
     # Process with NLP and geocoding
     item = process_item_with_nlp_geocoding(item, text)
     
+    # Process with credibility scoring
+    item = process_item_with_credibility(item, db)
+    
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -268,8 +298,26 @@ async def ingest_citizen(
 
 # --- list items for map ---
 @app.get("/api/items")
-def list_items(db: Session = Depends(get_db)):
-    rows = db.query(Item).order_by(Item.created_at.desc()).limit(500).all()
+def list_items(
+    min_credibility: Optional[float] = None,
+    needs_review: Optional[str] = None,
+    suspected_rumor: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(Item)
+    
+    # Apply filters
+    if min_credibility is not None:
+        query = query.filter(Item.score_credibility >= min_credibility)
+    
+    if needs_review is not None:
+        query = query.filter(Item.needs_review == needs_review)
+    
+    if suspected_rumor is not None:
+        query = query.filter(Item.suspected_rumor == suspected_rumor)
+    
+    rows = query.order_by(Item.created_at.desc()).limit(500).all()
+    
     def to_dict(r: Item):
         return {
             "id": r.id,
@@ -284,6 +332,10 @@ def list_items(db: Session = Depends(get_db)):
             "media_url": r.media_url,
             "language": r.language,
             "disaster_type": r.disaster_type,
+            "score_credibility": r.score_credibility,
+            "needs_review": r.needs_review,
+            "suspected_rumor": r.suspected_rumor,
+            "credibility_signals": r.credibility_signals,
             "created_at": r.created_at.isoformat() if r.created_at else None
         }
     return {"count": len(rows), "items": [to_dict(r) for r in rows]}
@@ -326,6 +378,94 @@ def process_existing_items(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Error processing items: {str(e)}")
         return {"error": str(e), "processed_count": 0}
+
+# --- process existing items with credibility scoring ---
+@app.post("/api/process-credibility")
+def process_existing_items_credibility(db: Session = Depends(get_db)):
+    """Process existing items that don't have credibility scores"""
+    try:
+        # Find items without credibility scores
+        items_to_process = db.query(Item).filter(
+            Item.score_credibility.is_(None)
+        ).limit(100).all()  # Process in batches
+        
+        processed_count = 0
+        for item in items_to_process:
+            # Process with credibility scoring
+            processed_item = process_item_with_credibility(item, db)
+            
+            # Update the item in the database
+            item.score_credibility = processed_item.score_credibility
+            item.needs_review = processed_item.needs_review
+            item.suspected_rumor = processed_item.suspected_rumor
+            item.credibility_signals = processed_item.credibility_signals
+            
+            processed_count += 1
+        
+        db.commit()
+        
+        return {
+            "status": "ok",
+            "processed_count": processed_count,
+            "total_items": db.query(Item).count()
+        }
+    except Exception as e:
+        logger.error(f"Error processing credibility: {str(e)}")
+        return {"error": str(e), "processed_count": 0}
+
+# --- credibility statistics ---
+@app.get("/api/credibility-stats")
+def credibility_stats(db: Session = Depends(get_db)):
+    """Get credibility statistics for all items"""
+    try:
+        total_items = db.query(Item).count()
+        items_with_credibility = db.query(Item).filter(Item.score_credibility.isnot(None)).count()
+        
+        # Get credibility score distribution
+        credibility_scores = db.query(Item.score_credibility).filter(
+            Item.score_credibility.isnot(None)
+        ).all()
+        
+        scores = [score[0] for score in credibility_scores]
+        
+        # Calculate statistics
+        avg_credibility = sum(scores) / len(scores) if scores else 0
+        min_credibility = min(scores) if scores else 0
+        max_credibility = max(scores) if scores else 0
+        
+        # Count by credibility ranges
+        high_credibility = db.query(Item).filter(Item.score_credibility >= 0.7).count()
+        medium_credibility = db.query(Item).filter(
+            Item.score_credibility >= 0.4, 
+            Item.score_credibility < 0.7
+        ).count()
+        low_credibility = db.query(Item).filter(Item.score_credibility < 0.4).count()
+        
+        # Count flags
+        needs_review_count = db.query(Item).filter(Item.needs_review == 'true').count()
+        suspected_rumor_count = db.query(Item).filter(Item.suspected_rumor == 'true').count()
+        
+        return {
+            "total_items": total_items,
+            "items_with_credibility": items_with_credibility,
+            "credibility_stats": {
+                "average": round(avg_credibility, 3),
+                "minimum": round(min_credibility, 3),
+                "maximum": round(max_credibility, 3)
+            },
+            "credibility_distribution": {
+                "high_credibility": high_credibility,
+                "medium_credibility": medium_credibility,
+                "low_credibility": low_credibility
+            },
+            "flags": {
+                "needs_review": needs_review_count,
+                "suspected_rumor": suspected_rumor_count
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting credibility stats: {str(e)}")
+        return {"error": str(e)}
 
 # --- convenience loader: try to reach 50+ items ---
 @app.get("/ingest/sample")

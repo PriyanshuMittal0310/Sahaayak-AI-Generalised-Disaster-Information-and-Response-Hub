@@ -32,6 +32,8 @@ function ReportForm({ onSubmitted }) {
     
     setSubmitting(true);
     try {
+      console.log('Submitting report to:', `${API_URL}/api/ingest`);
+      
       const fd = new FormData();
       fd.append("text", text);
       if (coords.lat && coords.lon) {
@@ -46,17 +48,21 @@ function ReportForm({ onSubmitted }) {
       });
       
       if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
+        const errorText = await res.text();
+        console.error('Submit error response:', errorText);
+        throw new Error(`HTTP error! status: ${res.status} - ${errorText}`);
       }
       
       const out = await res.json();
+      console.log('Submit response:', out);
       setSubmitting(false);
+      
       if (out.ok) {
         setText(""); 
         setFile(null); 
         setCoords({ lat: "", lon: "" });
         onSubmitted?.();
-        alert("Report submitted!");
+        alert("Report submitted successfully!");
       } else {
         alert(out.error || "Failed to submit report");
       }
@@ -118,6 +124,7 @@ export default function App() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [credibilityFilter, setCredibilityFilter] = useState("all");
   const centerIndia = [20.59, 78.96];
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -127,17 +134,31 @@ export default function App() {
       setLoading(true);
       setError(null);
       
+      console.log('Fetching data from:', API_URL);
+      
+      // Test backend connection first
+      const healthRes = await fetch(`${API_URL}/health`);
+      if (!healthRes.ok) {
+        throw new Error(`Backend not responding: ${healthRes.status}`);
+      }
+      console.log('Backend health check passed');
+      
       // Fetch USGS data
+      console.log('Fetching USGS data...');
       const usgsRes = await fetch(`${API_URL}/ingest/usgs`);
       if (!usgsRes.ok) {
-        throw new Error(`Failed to fetch USGS data: ${usgsRes.status} ${usgsRes.statusText}`);
+        const usgsError = await usgsRes.text();
+        console.error('USGS fetch error:', usgsError);
+        throw new Error(`Failed to fetch USGS data: ${usgsRes.status}`);
       }
+      console.log('USGS data fetched successfully');
       
       // Fetch all items with retry logic
       let itemsRes;
       let itemsData;
       
       try {
+        console.log('Fetching items...');
         itemsRes = await fetch(`${API_URL}/api/items`);
         if (!itemsRes.ok) {
           throw new Error(`Failed to fetch items: ${itemsRes.status} ${itemsRes.statusText}`);
@@ -154,6 +175,7 @@ export default function App() {
       }
       
       if (itemsData && itemsData.items) {
+        console.log('Items fetched successfully:', itemsData.count, 'items');
         setItems(itemsData.items);
       } else {
         console.warn('Unexpected API response format:', itemsData);
@@ -161,8 +183,8 @@ export default function App() {
       }
       
     } catch (error) {
-      console.error('Error in fetchData:', error);
-      setError(`Error: ${error.message}. Please try refreshing the page.`);
+      console.error('Error fetching data:', error);
+      setError(`Connection failed: ${error.message}. Please ensure the backend is running on ${API_URL}`);
       // Show error in the UI for 5 seconds
       setTimeout(() => setError(null), 5000);
     } finally {
@@ -188,6 +210,17 @@ export default function App() {
 
   // Filter items by source for better organization
   const citizenReports = items.filter(item => item.source === 'CITIZEN');
+  
+  // Filter items by credibility
+  const filteredItems = items.filter(item => {
+    if (credibilityFilter === "all") return true;
+    if (credibilityFilter === "high" && item.score_credibility >= 0.7) return true;
+    if (credibilityFilter === "medium" && item.score_credibility >= 0.4 && item.score_credibility < 0.7) return true;
+    if (credibilityFilter === "low" && item.score_credibility < 0.4) return true;
+    if (credibilityFilter === "needs_review" && item.needs_review === 'true') return true;
+    if (credibilityFilter === "suspected_rumor" && item.suspected_rumor === 'true') return true;
+    return false;
+  });
 
   // Format content based on item source
   const formatContent = (item) => {
@@ -371,6 +404,26 @@ export default function App() {
         >
           Report Incident
         </button>
+        <select
+          value={credibilityFilter}
+          onChange={(e) => setCredibilityFilter(e.target.value)}
+          style={{
+            padding: '6px 12px',
+            borderRadius: '4px',
+            border: '1px solid #ddd',
+            background: 'white',
+            fontSize: '0.9em',
+            cursor: 'pointer'
+          }}
+        >
+          <option value="all">All Reports</option>
+          <option value="high">High Credibility (70%+)</option>
+          <option value="medium">Medium Credibility (40-70%)</option>
+          <option value="low">Low Credibility (&lt;40%)</option>
+          <option value="needs_review">Needs Review</option>
+          <option value="suspected_rumor">Suspected Rumors</option>
+        </select>
+        
         <button 
           onClick={refresh} 
           style={{ 
@@ -498,7 +551,7 @@ export default function App() {
             </div>
 
             {/* Map Markers */}
-            {items
+            {filteredItems
               .filter(item => item.lat != null && item.lon != null)
               .map((item) => {
                 const color = getMarkerColor(item.source);
@@ -560,7 +613,7 @@ export default function App() {
                             border: '1px solid white',
                             boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
                           }}></div>
-                          <div>
+                          <div style={{ flex: 1 }}>
                             <div style={{ fontSize: '1.1em', fontWeight: 'bold', lineHeight: '1.2' }}>
                               {isEarthquake ? 'Earthquake' : isGDACS ? 'Disaster Alert' : isCitizen ? 'Citizen Report' : 'Report'}
                             </div>
@@ -568,8 +621,52 @@ export default function App() {
                               {item.source}{item.source_handle && ` • ${item.source_handle}`}
                             </div>
                           </div>
+                          {/* Credibility Score Display */}
+                          {item.score_credibility !== null && item.score_credibility !== undefined && (
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '0.8em',
+                              background: item.score_credibility >= 0.7 ? '#d4edda' : 
+                                         item.score_credibility >= 0.4 ? '#fff3cd' : '#f8d7da',
+                              color: item.score_credibility >= 0.7 ? '#155724' : 
+                                    item.score_credibility >= 0.4 ? '#856404' : '#721c24',
+                              padding: '2px 6px',
+                              borderRadius: '12px',
+                              border: '1px solid',
+                              borderColor: item.score_credibility >= 0.7 ? '#c3e6cb' : 
+                                         item.score_credibility >= 0.4 ? '#ffeaa7' : '#f5c6cb'
+                            }}>
+                              <span>🔍</span>
+                              <span>{(item.score_credibility * 100).toFixed(0)}%</span>
+                            </div>
+                          )}
                         </div>
                         {formatContent(item)}
+                        
+                        {/* Credibility Flags */}
+                        {(item.needs_review === 'true' || item.suspected_rumor === 'true') && (
+                          <div style={{ 
+                            marginTop: '8px', 
+                            padding: '6px 8px', 
+                            background: '#f8f9fa', 
+                            borderRadius: '4px',
+                            border: '1px solid #dee2e6',
+                            fontSize: '0.8em'
+                          }}>
+                            {item.needs_review === 'true' && (
+                              <div style={{ color: '#856404', marginBottom: '2px' }}>
+                                ⚠️ Needs Review
+                              </div>
+                            )}
+                            {item.suspected_rumor === 'true' && (
+                              <div style={{ color: '#721c24' }}>
+                                🚨 Suspected Rumor
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </Popup>
                   </Marker>
