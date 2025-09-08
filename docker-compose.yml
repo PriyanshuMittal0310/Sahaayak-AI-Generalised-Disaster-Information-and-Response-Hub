@@ -40,24 +40,28 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: sahaayak-api
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
-      - DOCKER_ENV=true
-      - DATABASE_URL=postgresql://dev:dev@db:5432/crisis
+      - ENVIRONMENT=development
+      - DEBUG=True
+      - POSTGRES_USER=${POSTGRES_USER:-dev}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dev}
+      - POSTGRES_DB=${POSTGRES_DB:-crisis}
+      - DB_HOST=db
+      - DB_PORT=5432
       - REDIS_URL=redis://redis:6379/0
       - USGS_API_URL=https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson
-      # Rate limiting
       - RATE_LIMIT=100/minute
       - RATE_LIMIT_WINDOW=60
-      # CORS settings
       - CORS_ORIGINS=*
       - RSS_FEEDS=https://www.gdacs.org/xml/rss.xml,https://www.gdacs.org/xml/rss_earthquake.xml
     volumes:
       - ./backend:/app
-      - uploads:/app/uploads
+      - ./uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -65,7 +69,6 @@ services:
         condition: service_healthy
     networks:
       - sahaayak-network
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

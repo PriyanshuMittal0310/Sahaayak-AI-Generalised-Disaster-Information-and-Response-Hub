@@ -1,6 +1,7 @@
 import os, uuid, json
 from typing import Optional, List
-from fastapi import FastAPI, Depends, UploadFile, File, Form
+from fastapi import FastAPI, Depends, UploadFile, File, Form, HTTPException
+from langdetect import detect, LangDetectException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -14,10 +15,28 @@ from services.nlp_service import nlp_service
 from services.geocoding_service import geocoding_service
 from services.credibility_service import credibility_service
 
-# --- setup & CORS ---
-Base.metadata.create_all(bind=engine)
+# Import API routers
+from api.disaster_routes import router as disaster_router
 
-app = FastAPI(title="CrisisConnect API", version="0.4")
+# --- setup & CORS ---
+app = FastAPI(
+    title="Sahaayak AI API",
+    description="Disaster Information and Response Hub API",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+
+# Initialize database on startup
+@app.on_event("startup")
+async def startup_event():
+    from db import init_db
+    try:
+        init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing database: {str(e)}")
+        raise
 
 # Configure CORS to allow all origins for development
 app.add_middleware(
@@ -38,18 +57,21 @@ app.add_middleware(
     max_age=600,  # Cache preflight requests for 10 minutes
 )
 
+# Include API routers
+app.include_router(disaster_router)
+
 # static uploads
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
-def process_item_with_nlp_geocoding(item: Item, text: str) -> Item:
+async def process_item_with_nlp_geocoding(item: Item, text: str) -> Item:
     """Process an item with NLP and geocoding services"""
     if not text:
         return item
     
     # Process text with NLP
-    nlp_result = nlp_service.process_text(text)
+    nlp_result = await nlp_service.process_text(text)
     
     # Update item with NLP results
     item.language = nlp_result.get('language')
@@ -67,7 +89,7 @@ def process_item_with_nlp_geocoding(item: Item, text: str) -> Item:
                 location_texts.insert(0, item.place)
             
             # Process locations with geocoding
-            geocoding_result = geocoding_service.process_locations(location_texts)
+            geocoding_result = await geocoding_service.process_locations(location_texts)
             
             if geocoding_result:
                 item.lat = geocoding_result.get('lat')
@@ -84,9 +106,19 @@ def process_item_with_nlp_geocoding(item: Item, text: str) -> Item:
     
     return item
 
-def process_item_with_credibility(item: Item, db: Session) -> Item:
+async def process_item_with_credibility(item: Item, db: Session) -> Item:
     """Process an item with credibility scoring"""
-    return credibility_service.process_item_credibility(item, db)
+    # If the service method is not async, we can use asyncio.to_thread
+    # or make the service method async if it performs I/O operations
+    import asyncio
+    from functools import partial
+    
+    # Create a partial function with the arguments
+    process_func = partial(credibility_service.process_item_credibility, item, db)
+    
+    # Run the synchronous function in a thread pool
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, process_func)
 
 @app.on_event("startup")
 def startup_event():
@@ -112,64 +144,93 @@ def root():
 
 # --- pullers: USGS ---
 @app.get("/ingest/usgs")
-def ingest_usgs(db: Session = Depends(get_db)):
+async def ingest_usgs(db: Session = Depends(get_db)):
     try:
+        logger.info("Starting USGS data ingestion...")
         data = fetch_usgs_quakes()
         new_count = 0
-        events = []
+        
+        if not data:
+            logger.warning("No data received from USGS API")
+            return {"status": "success", "inserted": 0, "total": 0}
         
         for e in data:
             ext_id = e.get("id")
             if not ext_id:
+                logger.warning("Skipping USGS entry with missing ID")
                 continue
                 
-            # Check if this earthquake already exists
-            exists = db.query(Item).filter(Item.ext_id == ext_id, Item.source == "USGS").first()
-            lon, lat, depth = (e.get("coordinates") or [None, None, None]) + [None] * (3 - len(e.get("coordinates") or []))
-            
-            event_data = {
-                "id": ext_id,
-                "place": e.get("place"),
-                "magnitude": e.get("magnitude"),
-                "time_utc": e.get("time_utc"),
-                "url": e.get("url"),
-                "coordinates": [lon, lat, depth],
-                "raw": e.get("raw", {})
-            }
-            events.append(event_data)
-            
-            if not exists and lat is not None and lon is not None:
-                # Only add to database if it's new and has coordinates
+            try:
+                # Check if this earthquake already exists
+                exists = db.query(Item).filter(Item.ext_id == ext_id, Item.source == "USGS").first()
+                if exists:
+                    continue
+                    
+                # Extract coordinates
+                coords = e.get("geometry", {}).get("coordinates", [])
+                if len(coords) >= 2:
+                    lon, lat, _ = coords[0], coords[1], coords[2] if len(coords) > 2 else None
+                else:
+                    lat, lon = None, None
+                    
+                # Create initial item
                 item = Item(
                     ext_id=ext_id,
                     source="USGS",
                     source_handle="USGS",
-                    text=e.get("place"),
-                    magnitude=e.get("magnitude"),
+                    text=e.get("place", "")[:4000],
+                    magnitude=float(e.get("mag", 0)) if e.get("mag") is not None else None,
                     place=e.get("place"),
                     lat=lat,
                     lon=lon,
-                    raw_json=event_data,
+                    raw_json=e,
+                    status="processing"
                 )
                 
-                # Process with NLP and geocoding
-                item = process_item_with_nlp_geocoding(item, e.get("place", ""))
-                
-                # Process with credibility scoring
-                item = process_item_with_credibility(item, db)
-                
                 db.add(item)
-                new_count += 1
+                await db.commit()
+                await db.refresh(item)
                 
-        db.commit()
+                try:
+                    # Process with NLP and geocoding
+                    item = await process_item_with_nlp_geocoding(item, item.text)
+                    
+                    # Process with credibility scoring
+                    item = await process_item_with_credibility(item, db)
+                    
+                    # Update status
+                    item.status = "processed"
+                    db.add(item)
+                    await db.commit()
+                    
+                    new_count += 1
+                    
+                except Exception as proc_error:
+                    logger.error(f"Error processing USGS item {ext_id}: {str(proc_error)}")
+                    item.status = f"error: {str(proc_error)[:100]}"
+                    db.add(item)
+                    await db.commit()
+                
+            except Exception as item_error:
+                logger.error(f"Error processing USGS entry {ext_id}: {str(item_error)}")
+                continue
+        
+        logger.info(f"USGS ingestion completed. Inserted {new_count} new items.")
         return {
+            "status": "success",
             "inserted": new_count,
-            "fetched": len(events),
-            "events": events  # Return the events for the frontend
+            "total": len(data)
         }
+        
     except Exception as e:
-        logger.error(f"Error in USGS ingestion: {str(e)}")
-        return {"error": str(e), "inserted": 0, "fetched": 0, "events": []}
+        error_msg = f"Critical error in USGS ingestion: {str(e)}"
+        logger.error(error_msg)
+        return {
+            "status": "error",
+            "error": error_msg,
+            "inserted": 0,
+            "total": 0
+        }
 
 # --- stubs: Reddit & X (use seeds if no API keys yet) ---
 def _load_seed(path):
@@ -180,73 +241,122 @@ def _load_seed(path):
         logger.error(f"Seed load failed: {e}")
         return []
 
-@app.get("/ingest/seed/reddit")
-def ingest_seed_reddit(db: Session = Depends(get_db)):
-    seed = _load_seed(os.path.join(os.getcwd(), "seeds", "reddit_seed.json"))
-    new = 0
-    for s in seed:
-        ext_id = s.get("id")
-        if not ext_id:
-            continue
-        exists = db.query(Item).filter(Item.ext_id == ext_id, Item.source == "REDDIT").first()
-        if exists:
-            continue
-        item = Item(
-            ext_id=ext_id,
-            source="REDDIT",
-            source_handle=s.get("subreddit"),
-            text=(s.get("title") or "") + " - " + (s.get("text") or ""),
-            place=None,
-            lat=s.get("lat"),
-            lon=s.get("lon"),
-            raw_json=s
-        )
+@app.get("/ingest/reddit")
+async def ingest_reddit(db: Session = Depends(get_db)):
+    try:
+        seed = _load_seed(os.path.join(os.getcwd(), "seeds", "reddit_seed.json"))
+        new = 0
         
-        # Process with NLP and geocoding
-        item = process_item_with_nlp_geocoding(item, item.text)
+        for s in seed:
+            ext_id = s.get("id")
+            if not ext_id:
+                continue
+                
+            # Check if item already exists
+            exists = db.query(Item).filter(Item.ext_id == ext_id, Item.source == "REDDIT").first()
+            if exists:
+                continue
+                
+            # Create new item
+            item = Item(
+                ext_id=ext_id,
+                source="REDDIT",
+                source_handle=s.get("subreddit"),
+                text=((s.get("title") or "") + " - " + (s.get("text") or ""))[:4000],
+                place=None,
+                lat=s.get("lat"),
+                lon=s.get("lon"),
+                raw_json=s,
+                status="processing"
+            )
+            db.add(item)
+            await db.commit()
+            await db.refresh(item)
+            
+            try:
+                # Process with NLP and geocoding
+                item = await process_item_with_nlp_geocoding(item, item.text)
+                
+                # Process with credibility scoring
+                item = await process_item_with_credibility(item, db)
+                
+                # Update status
+                item.status = "processed"
+                db.add(item)
+                await db.commit()
+                
+                new += 1
+                
+            except Exception as e:
+                logger.error(f"Error processing Reddit item {ext_id}: {str(e)}")
+                item.status = f"error: {str(e)[:100]}"
+                db.add(item)
+                await db.commit()
         
-        # Process with credibility scoring
-        item = process_item_with_credibility(item, db)
+        return {"status": "completed", "inserted": new, "fetched": len(seed)}
         
-        db.add(item)
-        new += 1
-    db.commit()
-    return {"inserted": new, "fetched": len(seed)}
+    except Exception as e:
+        logger.error(f"Error in ingest_reddit: {str(e)}")
+        return {"status": "error", "error": str(e), "inserted": 0, "fetched": 0}
 
 @app.get("/ingest/seed/x")
-def ingest_seed_x(db: Session = Depends(get_db)):
-    seed = _load_seed(os.path.join(os.getcwd(), "seeds", "x_seed.json"))
-    new = 0
-    for s in seed:
-        ext_id = s.get("id")
-        if not ext_id:
-            continue
-        exists = db.query(Item).filter(Item.ext_id == ext_id, Item.source == "X").first()
-        if exists:
-            continue
-        item = Item(
-            ext_id=ext_id,
-            source="X",
-            source_handle=s.get("handle"),
-            text=s.get("text"),
-            place=None,
-            lat=s.get("lat"),
-            lon=s.get("lon"),
-            raw_json=s
-        )
+async def ingest_seed_x(db: Session = Depends(get_db)):
+    try:
+        seed = _load_seed(os.path.join(os.getcwd(), "seeds", "x_seed.json"))
+        new = 0
         
-        # Process with NLP and geocoding
-        item = process_item_with_nlp_geocoding(item, item.text)
+        for s in seed:
+            ext_id = s.get("id")
+            if not ext_id:
+                continue
+                
+            # Check if item already exists
+            exists = db.query(Item).filter(Item.ext_id == ext_id, Item.source == "X").first()
+            if exists:
+                continue
+                
+            # Create new item
+            item = Item(
+                ext_id=ext_id,
+                source="X",
+                source_handle=s.get("handle"),
+                text=str(s.get("text", ""))[:4000],
+                place=None,
+                lat=s.get("lat"),
+                lon=s.get("lon"),
+                raw_json=s,
+                status="processing"
+            )
+            db.add(item)
+            await db.commit()
+            await db.refresh(item)
+            
+            try:
+                # Process with NLP and geocoding
+                item = await process_item_with_nlp_geocoding(item, item.text)
+                
+                # Process with credibility scoring
+                item = await process_item_with_credibility(item, db)
+                
+                # Update status
+                item.status = "processed"
+                db.add(item)
+                await db.commit()
+                
+                new += 1
+                
+            except Exception as e:
+                logger.error(f"Error processing X item {ext_id}: {str(e)}")
+                item.status = f"error: {str(e)[:100]}"
+                db.add(item)
+                await db.commit()
         
-        # Process with credibility scoring
-        item = process_item_with_credibility(item, db)
+        return {"status": "completed", "inserted": new, "fetched": len(seed)}
         
-        db.add(item)
-        new += 1
-    db.commit()
-    return {"inserted": new, "fetched": len(seed)}
+    except Exception as e:
+        logger.error(f"Error in ingest_seed_x: {str(e)}")
+        return {"status": "error", "error": str(e), "inserted": 0, "fetched": 0}
 
-# --- citizen web form ingest (multipart) ---
 @app.post("/api/ingest")
 async def ingest_citizen(
     text: str = Form(...),
@@ -255,6 +365,11 @@ async def ingest_citizen(
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
+    # Detect language
+    try:
+        lang = detect(text)
+    except LangDetectException:
+        lang = 'en'  # Default to English if detection fails
     media_url = None
     if file:
         # naive file validation (content-type startswith image/)
@@ -275,14 +390,15 @@ async def ingest_citizen(
         lat=lat,
         lon=lon,
         media_url=media_url,
+        language=lang,  # Store detected language
         raw_json={"text": text, "lat": lat, "lon": lon, "media_url": media_url}
     )
     
     # Process with NLP and geocoding
-    item = process_item_with_nlp_geocoding(item, text)
+    item = await process_item_with_nlp_geocoding(item, text)
     
     # Process with credibility scoring
-    item = process_item_with_credibility(item, db)
+    item = await process_item_with_credibility(item, db)
     
     db.add(item)
     db.commit()
@@ -291,7 +407,7 @@ async def ingest_citizen(
 
 # --- list items for map ---
 @app.get("/api/items")
-def list_items(
+async def list_items(
     min_credibility: Optional[float] = None,
     needs_review: Optional[str] = None,
     suspected_rumor: Optional[str] = None,
@@ -335,7 +451,7 @@ def list_items(
 
 # --- process existing items with NLP and geocoding ---
 @app.post("/api/process-nlp-geocoding")
-def process_existing_items(db: Session = Depends(get_db)):
+async def process_existing_items(db: Session = Depends(get_db)):
     """Process existing items that don't have NLP or geocoding data"""
     try:
         # Find items without language or disaster_type
@@ -347,7 +463,7 @@ def process_existing_items(db: Session = Depends(get_db)):
         for item in items_to_process:
             if item.text:
                 # Process with NLP and geocoding
-                processed_item = process_item_with_nlp_geocoding(item, item.text)
+                processed_item = await process_item_with_nlp_geocoding(item, item.text)
                 
                 # Update the item in the database
                 item.language = processed_item.language
@@ -374,37 +490,75 @@ def process_existing_items(db: Session = Depends(get_db)):
 
 # --- process existing items with credibility scoring ---
 @app.post("/api/process-credibility")
-def process_existing_items_credibility(db: Session = Depends(get_db)):
+async def process_existing_items_credibility(db: Session = Depends(get_db)):
     """Process existing items that don't have credibility scores"""
     try:
+        logger.info("Starting credibility processing for existing items...")
+        
         # Find items without credibility scores
         items_to_process = db.query(Item).filter(
             Item.score_credibility.is_(None)
         ).limit(100).all()  # Process in batches
         
-        processed_count = 0
-        for item in items_to_process:
-            # Process with credibility scoring
-            processed_item = process_item_with_credibility(item, db)
-            
-            # Update the item in the database
-            item.score_credibility = processed_item.score_credibility
-            item.needs_review = processed_item.needs_review
-            item.suspected_rumor = processed_item.suspected_rumor
-            item.credibility_signals = processed_item.credibility_signals
-            
-            processed_count += 1
+        if not items_to_process:
+            logger.info("No items need credibility processing")
+            return {
+                "status": "success",
+                "message": "No items need credibility processing",
+                "processed_count": 0,
+                "total_items": db.query(Item).count()
+            }
         
-        db.commit()
+        processed_count = 0
+        
+        for item in items_to_process:
+            try:
+                # Update status
+                item.status = "processing_credibility"
+                db.add(item)
+                await db.commit()
+                await db.refresh(item)
+                
+                # Process with credibility scoring
+                item = await process_item_with_credibility(item, db)
+                
+                # Update status
+                item.status = "processed"
+                db.add(item)
+                await db.commit()
+                
+                processed_count += 1
+                
+                if processed_count % 10 == 0:
+                    logger.info(f"Processed {processed_count} items...")
+                    
+            except Exception as item_error:
+                logger.error(f"Error processing item {item.id}: {str(item_error)}")
+                try:
+                    item.status = f"error_credibility: {str(item_error)[:100]}"
+                    db.add(item)
+                    await db.commit()
+                except Exception as commit_error:
+                    logger.error(f"Failed to update item status: {str(commit_error)}")
+                continue
+        
+        logger.info(f"Completed credibility processing. Processed {processed_count} items.")
         
         return {
-            "status": "ok",
+            "status": "success",
             "processed_count": processed_count,
-            "total_items": db.query(Item).count()
+            "total_items": db.query(Item).count(),
+            "message": f"Processed {processed_count} items"
         }
+        
     except Exception as e:
-        logger.error(f"Error processing credibility: {str(e)}")
-        return {"error": str(e), "processed_count": 0}
+        error_msg = f"Error in process_existing_items_credibility: {str(e)}"
+        logger.error(error_msg)
+        return {
+            "status": "error",
+            "error": error_msg,
+            "processed_count": 0
+        }
 
 # --- credibility statistics ---
 @app.get("/api/credibility-stats")

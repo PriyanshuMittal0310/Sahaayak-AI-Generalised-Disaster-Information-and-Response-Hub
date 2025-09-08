@@ -42,23 +42,29 @@ function ReportForm({ onSubmitted }) {
     );
   };
 
+
+  const handleTextChange = (e) => {
+    setText(e.target.value);
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     if (!text.trim()) return;
     
     setSubmitting(true);
     try {
-      const fd = new FormData();
-      fd.append("text", text);
-      if (coords.lat && coords.lon) {
-        fd.append("lat", coords.lat);
-        fd.append("lon", coords.lon);
-      }
-      if (file) fd.append("file", file);
+      const payload = {
+        text: text,
+        detect_language: true,
+        use_openai: true
+      };
       
-      const res = await fetch(`${API_URL}/api/ingest`, { 
+      const res = await fetch(`${API_URL}/api/disasters/detect`, { 
         method: "POST",
-        body: fd 
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
       });
       
       if (!res.ok) {
@@ -66,17 +72,22 @@ function ReportForm({ onSubmitted }) {
         throw new Error(`HTTP error! status: ${res.status} - ${errorText}`);
       }
       
-      const out = await res.json();
+      const result = await res.json();
       setSubmitting(false);
       
-      if (out.ok) {
-        setText(""); 
-        setFile(null); 
-        setCoords({ lat: "", lon: "" });
-        onSubmitted?.();
-        alert("Report submitted successfully!");
+      // Reset form
+      setText("");
+      setFile(null);
+      setCoords({ lat: "", lon: "" });
+      
+      // Call the onSubmitted callback if provided
+      onSubmitted?.(result);
+      
+      // Show success message with disaster type if detected
+      if (result.disaster_type) {
+        alert(`Report submitted successfully! Detected disaster: ${result.disaster_type}`);
       } else {
-        alert(out.error || "Failed to submit report");
+        alert("Report submitted successfully!");
       }
     } catch (error) {
       console.error('Error submitting report:', error);
@@ -88,10 +99,11 @@ function ReportForm({ onSubmitted }) {
   return (
     <form onSubmit={submit} style={{ display: "grid", gap: 8, maxWidth: 520, padding: '20px' }}>
       <h3>Report an Incident</h3>
-      <textarea
+      <label>Report Details (required)</label>
+      <textarea 
         placeholder="Describe what you see (flooding, fire, etc.)"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={handleTextChange}
         rows={4}
         required
         style={{ width: '100%' }}
@@ -311,6 +323,114 @@ export default function App() {
     };
   }, []);
 
+  // Popup content for each marker
+  const popupContent = (item) => {
+    const sourceDisplay = item.source === 'CITIZEN' ? 'Citizen Report' : item.source;
+    const languageName = item.language || 'Unknown';
+    
+    return (
+      <div style={{ maxWidth: 300, maxHeight: 400, overflow: 'auto' }}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '10px',
+          paddingBottom: '5px',
+          borderBottom: '1px solid #eee'
+        }}>
+          <div style={{ fontWeight: 'bold', fontSize: '16px' }}>
+            {item.disaster_type || 'Incident'}
+          </div>
+          <div style={{
+            fontSize: '12px',
+            backgroundColor: '#f0f0f0',
+            padding: '2px 6px',
+            borderRadius: '10px',
+            color: '#555'
+          }}>
+            {sourceDisplay}
+          </div>
+        </div>
+        
+        {item.language && (
+          <div style={{ 
+            fontSize: '12px',
+            color: '#666',
+            marginBottom: '8px',
+            fontStyle: 'italic'
+          }}>
+            <i className="fas fa-language" style={{ marginRight: '5px' }}></i>
+            {languageName}
+          </div>
+        )}
+        
+        <div style={{ 
+          marginBottom: '10px',
+          lineHeight: '1.4',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word'
+        }}>
+          {item.text}
+        </div>
+        
+        {item.place && (
+          <div style={{ 
+            marginBottom: '5px', 
+            color: '#666',
+            fontSize: '13px'
+          }}>
+            <i className="fas fa-map-marker-alt" style={{ marginRight: '5px' }}></i>
+            {item.place}
+          </div>
+        )}
+        
+        {item.magnitude && (
+          <div style={{ 
+            marginBottom: '8px',
+            fontSize: '13px'
+          }}>
+            <i className="fas fa-chart-line" style={{ marginRight: '5px' }}></i>
+            <strong>Magnitude:</strong> {item.magnitude}
+          </div>
+        )}
+        
+        {item.created_at && (
+          <div style={{ 
+            fontSize: '11px', 
+            color: '#888', 
+            marginBottom: '5px',
+            marginTop: '10px',
+            paddingTop: '5px',
+            borderTop: '1px solid #eee'
+          }}>
+            <i className="far fa-clock" style={{ marginRight: '5px' }}></i>
+            {new Date(item.created_at).toLocaleString()}
+          </div>
+        )}
+        
+        {item.media_url && (
+          <div style={{ 
+            marginTop: '10px',
+            borderTop: '1px solid #eee',
+            paddingTop: '10px'
+          }}>
+            <img 
+              src={`${API_URL}${item.media_url}`} 
+              alt="Report media" 
+              style={{ 
+                maxWidth: '100%', 
+                maxHeight: '150px', 
+                borderRadius: '4px',
+                display: 'block',
+                margin: '0 auto'
+              }} 
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       {/* Header */}
@@ -447,102 +567,7 @@ export default function App() {
                       }}
                     >
                       <Popup closeButton={false}>
-                        <div style={{ maxWidth: '250px' }}>
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            marginBottom: '8px',
-                            paddingBottom: '4px',
-                            borderBottom: '1px solid #eee'
-                          }}>
-                            <span style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: '24px',
-                              height: '24px',
-                              borderRadius: '50%',
-                              backgroundColor: '#f0f0f0',
-                              marginRight: '8px',
-                              fontSize: '16px'
-                            }}>
-                              {(() => {
-                                try {
-                                  const iconHtml = getMarkerIcon(disasterType, source).options.html;
-                                  const match = iconHtml.match(/>(.*?)<\/div>/);
-                                  return match ? match[1] : '📍';
-                                } catch (e) {
-                                  return '📍';
-                                }
-                              })()}
-                            </span>
-                            <strong style={{ flex: 1 }}>
-                              {item.disaster_type || 'Incident'}
-                              {source && ` (${source})`}
-                            </strong>
-                            {item.score_credibility !== undefined && (
-                              <span style={{
-                                padding: '2px 6px',
-                                borderRadius: '10px',
-                                fontSize: '12px',
-                                backgroundColor: item.score_credibility >= 0.7 ? '#d4edda' : 
-                                              item.score_credibility >= 0.4 ? '#fff3cd' : '#f8d7da',
-                                color: item.score_credibility >= 0.7 ? '#155724' : 
-                                     item.score_credibility >= 0.4 ? '#856404' : '#721c24'
-                              }}>
-                                {Math.round(item.score_credibility * 100)}%
-                              </span>
-                            )}
-                          </div>
-                          
-                          <div style={{ margin: '8px 0' }}>
-                            {item.text || 'No description available'}
-                          </div>
-                          
-                          {item.location_name && (
-                            <div style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              fontSize: '12px',
-                              color: '#666',
-                              marginBottom: '8px'
-                            }}>
-                              📍 {item.location_name}
-                            </div>
-                          )}
-                          
-                          <div style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            marginTop: '8px',
-                            paddingTop: '4px',
-                            borderTop: '1px solid #eee',
-                            fontSize: '12px',
-                            color: '#666'
-                          }}>
-                            <span>
-                              {item.magnitude && `Magnitude: ${item.magnitude} `}
-                            </span>
-                            <span>
-                              {new Date(item.created_at).toLocaleString()}
-                            </span>
-                          </div>
-                          
-                          {item.media_url && (
-                            <div style={{ marginTop: '8px' }}>
-                              <img 
-                                src={item.media_url} 
-                                alt="Disaster media" 
-                                style={{ 
-                                  maxWidth: '100%', 
-                                  maxHeight: '150px',
-                                  borderRadius: '4px',
-                                  marginTop: '8px'
-                                }} 
-                              />
-                            </div>
-                          )}
-                        </div>
+                        {popupContent(item)}
                       </Popup>
                     </Marker>
                   );

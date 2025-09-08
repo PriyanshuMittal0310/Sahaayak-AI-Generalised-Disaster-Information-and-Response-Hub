@@ -2,6 +2,22 @@
 
 A comprehensive real-time disaster monitoring platform with a React frontend and FastAPI backend that visualizes disaster data from multiple sources including USGS, citizen reports, and social media feeds. The application provides an interactive map with real-time disaster updates, intelligent disaster classification, and location-based incident reporting.
 
+## 📌 Latest Updates
+
+- **Enhanced Language Processing**: Improved disaster detection with multi-language support
+- **Streamlined API**: Simplified endpoints for better integration
+- **Robust Error Handling**: Better error messages and validation
+- **Performance Optimizations**: Faster response times and reduced resource usage
+- **Simplified Deployment**: Easier setup with Docker Compose
+
+## 🎯 Project Goals
+
+1. **Real-time Disaster Monitoring**: Aggregate and analyze disaster data from multiple sources
+2. **Citizen Engagement**: Enable public reporting of disaster incidents
+3. **Data Visualization**: Provide intuitive visualizations of disaster data
+4. **Automated Analysis**: Use AI to classify and prioritize disaster reports
+5. **Open Source**: Community-driven development for global impact
+
 ## 🌟 Features
 
 ### Backend (FastAPI)
@@ -34,6 +50,59 @@ A comprehensive real-time disaster monitoring platform with a React frontend and
 - 📍 **Named Entity Recognition** - Location extraction using spaCy + OpenAI fallback
 - 🗺️ **Intelligent Geocoding** - OpenStreetMap Nominatim integration with rate limiting
 - 📊 **PostGIS Integration** - Spatial queries and geometry processing
+
+## 🏗 System Architecture
+
+### Backend Architecture
+```
+├── backend/
+│   ├── api/                  # API endpoints and routes
+│   ├── migrations/           # Database migrations
+│   ├── models/              # Database models
+│   ├── services/            # Core business logic
+│   │   ├── nlp_service.py   # NLP processing
+│   │   ├── geocoding_service.py  # Location services
+│   │   └── credibility_service.py # Credibility scoring
+│   ├── main.py             # FastAPI application entry
+│   └── requirements.txt    # Python dependencies
+```
+
+### Frontend Architecture
+```
+├── frontend/
+│   ├── public/            # Static files
+│   └── src/
+│       ├── components/    # Reusable UI components
+│       ├── pages/         # Page components
+│       ├── services/      # API service layer
+│       └── App.jsx        # Main application component
+```
+
+## 🌐 API Endpoints
+
+### Disaster Detection
+- `POST /api/disasters/detect` - Analyze text for disaster information
+  ```json
+  {
+    "text": "Heavy rainfall caused flooding in Mumbai",
+    "detect_language": true,
+    "use_openai": false
+  }
+  ```
+
+### Batch Processing
+- `POST /api/disasters/batch-detect` - Process multiple texts at once
+  ```json
+  [
+    {"text": "Earthquake in California"},
+    {"text": "Forest fire in Australia"}
+  ]
+  ```
+
+### Data Access
+- `GET /api/items` - List all disaster reports
+- `GET /api/items/{id}` - Get specific report details
+- `POST /api/ingest` - Submit new citizen report
 
 ## 🚀 Quick Start
 
@@ -71,7 +140,7 @@ A comprehensive real-time disaster monitoring platform with a React frontend and
    - API Documentation: http://localhost:8000/docs
    - Health check: http://localhost:8000/health
 
-## 🔧 Development Setup
+## 🛠 Development Setup
 
 ### Backend Development
 
@@ -79,24 +148,102 @@ A comprehensive real-time disaster monitoring platform with a React frontend and
    ```bash
    cd backend
    python -m venv venv
-   source venv/bin/activate  # On Windows: .\venv\Scripts\activate
+   # On Windows: .\venv\Scripts\activate
+   # On Unix/Mac: source venv/bin/activate
    pip install -r requirements.txt
    ```
 
-2. **Download spaCy model for NLP processing**
-   ```bash
-   python -m spacy download en_core_web_sm
+2. **Set up environment variables**
+   Create a `.env` file in the backend directory:
+   ```env
+   DATABASE_URL=postgresql://dev:dev@localhost:5432/crisis
+   REDIS_URL=redis://localhost:6379/0
+   OPENAI_API_KEY=your-api-key-here  # Optional for enhanced features
    ```
 
-3. **Set up environment variables (Optional)**
+3. **Database setup**
    ```bash
-   export OPENAI_API_KEY="your-openai-api-key-here"  # For enhanced NLP features
-   ```
-
-4. **Run database migrations**
-   ```bash
+   # Run migrations
    alembic upgrade head
+   
+   # Seed initial data
+   python -m seeds.seed_initial_data
    ```
+
+4. **Run the development server**
+   ```bash
+   uvicorn main:app --reload
+   ```
+
+### Frontend Development
+
+1. **Install dependencies**
+   ```bash
+   cd frontend
+   npm install
+   ```
+
+2. **Configure environment**
+   Create a `.env` file in the frontend directory:
+   ```env
+   REACT_APP_API_URL=http://localhost:8000
+   ```
+
+3. **Start the development server**
+   ```bash
+   npm start
+   ```
+
+## 🧪 Testing
+
+### Backend Tests
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_nlp.py -v
+```
+
+### Frontend Tests
+```bash
+# Run unit tests
+npm test
+
+# Run end-to-end tests
+npm run test:e2e
+```
+
+## 🚀 Deployment
+
+### Production Deployment
+
+1. **Build the Docker images**
+   ```bash
+   docker-compose -f docker-compose.prod.yml build
+   ```
+
+2. **Start the services**
+   ```bash
+   docker-compose -f docker-compose.prod.yml up -d
+   ```
+
+3. **Monitor the services**
+   ```bash
+   docker-compose logs -f
+   ```
+
+### Environment Variables
+
+#### Backend
+- `DATABASE_URL`: PostgreSQL connection string
+- `REDIS_URL`: Redis connection URL
+- `OPENAI_API_KEY`: For enhanced NLP features
+- `DEBUG`: Set to `False` in production
+
+#### Frontend
+- `REACT_APP_API_URL`: Backend API URL
+- `NODE_ENV`: Set to `production` for production builds
 
 5. **Run the development server**
    ```bash
@@ -252,6 +399,37 @@ CREATE TABLE items (
 - `REACT_APP_API_URL`: Backend API URL (default: http://localhost:8000)
 - `NODE_ENV`: Environment mode
 - `CHOKIDAR_USEPOLLING`: File watching configuration
+
+## 👥 Contributing
+
+We welcome contributions from the community! Here's how you can help:
+
+1. **Report Bugs**
+   - Check existing issues to avoid duplicates
+   - Provide detailed reproduction steps
+   - Include error messages and screenshots if applicable
+
+2. **Suggest Enhancements**
+   - Describe the feature or improvement
+   - Explain why it would be valuable
+   - Include any relevant references or examples
+
+3. **Submit Pull Requests**
+   - Fork the repository
+   - Create a feature branch
+   - Add tests for your changes
+   - Update documentation as needed
+   - Submit a pull request with a clear description
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- Built with ❤️ by the Sahaayak AI team
+- Uses data from USGS, GDACS, and other open data sources
+- Powered by FastAPI, React, and PostGIS
 
 ## 📝 Usage Examples
 
