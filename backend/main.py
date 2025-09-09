@@ -17,6 +17,7 @@ from services.credibility_service import credibility_service
 
 # Import API routers
 from api.disaster_routes import router as disaster_router
+from api.telegram_routes import router as telegram_router
 
 # --- setup & CORS ---
 app = FastAPI(
@@ -59,6 +60,7 @@ app.add_middleware(
 
 # Include API routers
 app.include_router(disaster_router)
+app.include_router(telegram_router)
 
 # static uploads
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
