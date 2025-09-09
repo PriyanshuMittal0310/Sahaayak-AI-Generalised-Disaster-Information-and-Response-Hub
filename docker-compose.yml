@@ -43,30 +43,24 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    env_file:
+      - .env.docker
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
-      - ENVIRONMENT=development
-      - DEBUG=True
-      - POSTGRES_USER=${POSTGRES_USER:-dev}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dev}
-      - POSTGRES_DB=${POSTGRES_DB:-crisis}
-      - DB_HOST=db
-      - DB_PORT=5432
-      - REDIS_URL=redis://redis:6379/0
+      - RSS_FEEDS=https://www.gdacs.org/xml/rss.xml,https://www.gdacs.org/xml/rss_earthquake.xml
       - USGS_API_URL=https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson
       - RATE_LIMIT=100/minute
       - RATE_LIMIT_WINDOW=60
       - CORS_ORIGINS=*
-      - RSS_FEEDS=https://www.gdacs.org/xml/rss.xml,https://www.gdacs.org/xml/rss_earthquake.xml
-    volumes:
-      - ./backend:/app
-      - ./uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./uploads:/app/uploads
     networks:
       - sahaayak-network
     healthcheck:

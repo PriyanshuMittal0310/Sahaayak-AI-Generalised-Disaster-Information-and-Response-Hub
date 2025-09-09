@@ -16,6 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
     libgeos-dev \
     curl \
+    build-essential \
+    cmake \
+    libgdal-dev \
+    libspatialindex-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching

@@ -166,11 +166,13 @@ async def ingest_usgs(db: Session = Depends(get_db)):
                 if exists:
                     continue
                     
-                # Extract coordinates
-                coords = e.get("geometry", {}).get("coordinates", [])
-                if len(coords) >= 2:
-                    lon, lat, _ = coords[0], coords[1], coords[2] if len(coords) > 2 else None
+                # Extract coordinates - USGS returns [longitude, latitude, depth]
+                coords = e.get("coordinates", [])
+                if isinstance(coords, list) and len(coords) >= 2:
+                    lon, lat = float(coords[0]), float(coords[1])
+                    logger.info(f"Extracted coordinates: lon={lon}, lat={lat} for {e.get('place')}")
                 else:
+                    logger.warning(f"Invalid coordinates for {e.get('place')}: {coords}")
                     lat, lon = None, None
                     
                 # Create initial item
@@ -183,8 +185,7 @@ async def ingest_usgs(db: Session = Depends(get_db)):
                     place=e.get("place"),
                     lat=lat,
                     lon=lon,
-                    raw_json=e,
-                    status="processing"
+                    raw_json=e
                 )
                 
                 db.add(item)
@@ -192,24 +193,31 @@ async def ingest_usgs(db: Session = Depends(get_db)):
                 await db.refresh(item)
                 
                 try:
-                    # Process with NLP and geocoding
-                    item = await process_item_with_nlp_geocoding(item, item.text)
-                    
-                    # Process with credibility scoring
-                    item = await process_item_with_credibility(item, db)
-                    
-                    # Update status
-                    item.status = "processed"
+                    # Save the basic item first
                     db.add(item)
                     await db.commit()
+                    await db.refresh(item)
+                    
+                    try:
+                        # Process with NLP and geocoding
+                        item = await process_item_with_nlp_geocoding(item, item.text)
+                        
+                        # Process with credibility scoring
+                        item = await process_item_with_credibility(item, db)
+                        
+                        # Save the processed item
+                        db.add(item)
+                        await db.commit()
+                    except Exception as proc_error:
+                        logger.error(f"Error in post-processing for {ext_id}: {str(proc_error)}")
+                        # Continue even if post-processing fails - we still have the basic data
                     
                     new_count += 1
                     
                 except Exception as proc_error:
                     logger.error(f"Error processing USGS item {ext_id}: {str(proc_error)}")
-                    item.status = f"error: {str(proc_error)[:100]}"
-                    db.add(item)
-                    await db.commit()
+                    # Just log the error, don't update status
+                    await db.rollback()
                 
             except Exception as item_error:
                 logger.error(f"Error processing USGS entry {ext_id}: {str(item_error)}")
@@ -435,19 +443,27 @@ async def list_items(
             "source_handle": r.source_handle,
             "text": r.text,
             "place": r.place,
-            "magnitude": r.magnitude,
-            "lat": r.lat,
-            "lon": r.lon,
+            "magnitude": float(r.magnitude) if r.magnitude is not None else None,
+            "lat": float(r.lat) if r.lat is not None else None,
+            "lon": float(r.lon) if r.lon is not None else None,
             "media_url": r.media_url,
             "language": r.language,
             "disaster_type": r.disaster_type,
-            "score_credibility": r.score_credibility,
+            "score_credibility": float(r.score_credibility) if r.score_credibility is not None else None,
             "needs_review": r.needs_review,
             "suspected_rumor": r.suspected_rumor,
             "credibility_signals": r.credibility_signals,
-            "created_at": r.created_at.isoformat() if r.created_at else None
+            "created_at": r.created_at.isoformat() if hasattr(r.created_at, "isoformat") else (str(r.created_at) if r.created_at else None)
         }
-    return {"count": len(rows), "items": [to_dict(r) for r in rows]}
+    
+    items_serialized = []
+    for r in rows:
+        try:
+            items_serialized.append(to_dict(r))
+        except Exception as ser_err:
+            logger.error(f"Error serializing item id={getattr(r, 'id', 'unknown')}: {ser_err}")
+            continue
+    return {"count": len(items_serialized), "items": items_serialized}
 
 # --- process existing items with NLP and geocoding ---
 @app.post("/api/process-nlp-geocoding")
@@ -616,16 +632,22 @@ def credibility_stats(db: Session = Depends(get_db)):
 
 # --- convenience loader: try to reach 50+ items ---
 @app.get("/ingest/sample")
-def load_sample(db: Session = Depends(get_db)):
+async def load_sample(db: Session = Depends(get_db)):
     # Load USGS data
-    usgs_count = ingest_usgs(db)
+    usgs_result = await ingest_usgs(db)
+    usgs_count = usgs_result.get("inserted", 0) if isinstance(usgs_result, dict) else 0
     logger.info(f"Loaded {usgs_count} items from USGS")
     
     # Load GDACS RSS data
+    from ingest import ingest_rss_to_db
     gdacs_count = ingest_rss_to_db(db)
     logger.info(f"Loaded {gdacs_count} items from GDACS")
     
-    total_items = db.query(Item).count()
+    # Commit any pending changes
+    await db.commit()
+    
+    # Get total items count
+    total_items = (await db.execute("SELECT COUNT(*) FROM items")).scalar()
     logger.info(f"Total items in database: {total_items}")
     
     return {
