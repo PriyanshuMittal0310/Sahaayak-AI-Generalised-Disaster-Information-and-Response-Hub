@@ -247,6 +247,12 @@ export default function App() {
   const [tab, setTab] = useState("map");
   const [alertPreview, setAlertPreview] = useState("");
   const [alertStatus, setAlertStatus] = useState("");
+  // Structured alert fields
+  const [event_type, setEventType] = useState("");
+  const [place, setPlace] = useState("");
+  const [instruction, setInstruction] = useState("");
+  const [shelter, setShelter] = useState("");
+  const [priority, setPriority] = useState("");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -525,28 +531,64 @@ export default function App() {
           </div>
         )}
         {tab === 'events' && (
-          <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
-            <h3>Event Drawer</h3>
-            <ul style={{ listStyle: 'none', padding: 0 }}>
+          <div style={{ padding: '20px', maxWidth: '900px', margin: '0 auto' }}>
+            <h2 style={{ textAlign: 'center', marginBottom: 24 }}>Event Drawer</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px' }}>
               {filteredItems.map(item => (
-                <li key={item.id} style={{ marginBottom: '16px', borderBottom: '1px solid #eee', paddingBottom: '8px' }}>
-                  <strong>{item.disaster_type || 'Incident'}</strong> (Score: {item.score_credibility})<br />
-                  <span>{item.text}</span>
+                <div key={item.id} style={{ background: '#fff', borderRadius: '12px', boxShadow: '0 2px 12px rgba(0,0,0,0.07)', padding: '20px', border: '1px solid #eee', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ fontWeight: 'bold', fontSize: '18px', color: '#007bff', marginBottom: 4 }}>{item.disaster_type || 'Incident'}</div>
+                  <div style={{ fontSize: '15px', color: '#333', marginBottom: 4 }}>{item.text}</div>
+                  <div style={{ fontSize: '13px', color: '#888' }}>Incident ID: {item.id}</div>
+                  <div style={{ fontSize: '13px', color: '#28a745' }}>Score: {item.score_credibility}</div>
                   {item.place && <div style={{ color: '#666', fontSize: '13px' }}>Location: {item.place}</div>}
                   {item.created_at && <div style={{ fontSize: '11px', color: '#888' }}>Reported: {new Date(item.created_at).toLocaleString()}</div>}
-                </li>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
         )}
         {tab === 'alerts' && (
-          <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
-            <h3>Alert Preview & Send</h3>
-            <textarea value={alertPreview} onChange={e => setAlertPreview(e.target.value)} placeholder="Type or generate alert message here..." rows={4} style={{ width: '100%' }} />
-            <button style={{ marginTop: '10px', padding: '10px 20px', background: '#17a2b8', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }} onClick={async () => {
+          <div style={{ padding: '32px', maxWidth: '600px', margin: '0 auto', background: '#f8f9fa', borderRadius: '16px', boxShadow: '0 2px 16px rgba(0,0,0,0.08)' }}>
+            <h2 style={{ textAlign: 'center', marginBottom: 24, color: '#007bff' }}>Structured Alert Generator</h2>
+            <form onSubmit={async e => {
+              e.preventDefault();
+              setAlertStatus('Generating...');
+              const fields = { event_type, place, instruction, shelter, priority };
+              const prompt_en = `Generate a clear, concise disaster alert in English (<=180 chars, no PII) for the following event:\nEvent Type: ${fields.event_type}\nPlace: ${fields.place}\nInstruction: ${fields.instruction}\nShelter: ${fields.shelter}\nPriority: ${fields.priority}`;
+              const prompt_kn = `Translate the following alert to Kannada (<=180 chars, no PII):\n${alertPreview}`;
+              try {
+                const res_en = await fetch(`${API_URL}/api/openai/polish_alert`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ prompt: prompt_en })
+                });
+                if (!res_en.ok) throw new Error('Failed to polish alert');
+                const data_en = await res_en.json();
+                setAlertPreview(data_en.text);
+                const res_kn = await fetch(`${API_URL}/api/openai/translate_alert`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ prompt: prompt_kn })
+                });
+                if (!res_kn.ok) throw new Error('Failed to translate alert');
+                const data_kn = await res_kn.json();
+                setAlertStatus('Bilingual alert generated!');
+                setAlertPreview(prev => prev + '\n\nKannada: ' + data_kn.text);
+              } catch (err) {
+                setAlertStatus('Generation failed: ' + (err.message || 'Network error. Please check backend and API key.'));
+              }
+            }}>
+              <input type="text" placeholder="Event Type" value={event_type} onChange={e => setEventType(e.target.value)} style={{ width: '100%', marginBottom: 12, padding: '10px', borderRadius: '8px', border: '1px solid #dee2e6', fontSize: '16px' }} required />
+              <input type="text" placeholder="Place" value={place} onChange={e => setPlace(e.target.value)} style={{ width: '100%', marginBottom: 12, padding: '10px', borderRadius: '8px', border: '1px solid #dee2e6', fontSize: '16px' }} required />
+              <input type="text" placeholder="Instruction" value={instruction} onChange={e => setInstruction(e.target.value)} style={{ width: '100%', marginBottom: 12, padding: '10px', borderRadius: '8px', border: '1px solid #dee2e6', fontSize: '16px' }} required />
+              <input type="text" placeholder="Shelter" value={shelter} onChange={e => setShelter(e.target.value)} style={{ width: '100%', marginBottom: 12, padding: '10px', borderRadius: '8px', border: '1px solid #dee2e6', fontSize: '16px' }} />
+              <input type="text" placeholder="Priority" value={priority} onChange={e => setPriority(e.target.value)} style={{ width: '100%', marginBottom: 12, padding: '10px', borderRadius: '8px', border: '1px solid #dee2e6', fontSize: '16px' }} />
+              <button type="submit" style={{ marginTop: '10px', padding: '12px 24px', background: '#007bff', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>Generate Bilingual Alert</button>
+            </form>
+            <textarea value={alertPreview} onChange={e => setAlertPreview(e.target.value)} placeholder="Alert preview will appear here..." rows={4} style={{ width: '100%', marginTop: 16, padding: '12px', borderRadius: '8px', border: '1px solid #dee2e6', fontSize: '16px', background: '#fff' }} />
+            <button style={{ marginTop: '16px', padding: '12px 24px', background: '#28a745', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }} onClick={async () => {
               setAlertStatus('Sending...');
               try {
-                // Call backend to send alert to Telegram
                 const res = await fetch(`${API_URL}/api/telegram/send_alert`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -558,7 +600,7 @@ export default function App() {
                 setAlertStatus('Send failed: ' + err.message);
               }
             }}>Send Test Alert</button>
-            <div style={{ marginTop: '10px', color: '#888' }}>{alertStatus}</div>
+            <div style={{ marginTop: '16px', color: alertStatus.includes('failed') ? '#dc3545' : '#888', fontWeight: alertStatus.includes('failed') ? 'bold' : 'normal', textAlign: 'center', fontSize: '16px' }}>{alertStatus}</div>
           </div>
         )}
         {tab === 'admin' && (

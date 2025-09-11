@@ -1,11 +1,14 @@
 import os, uuid, json
 from typing import Optional, List
-from fastapi import FastAPI, Depends, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, Depends, UploadFile, File, Form, HTTPException, Request
 from langdetect import detect, LangDetectException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from loguru import logger
+from fastapi.responses import JSONResponse
+from dotenv import load_dotenv
+load_dotenv()
 
 from db import Base, engine, get_db
 from models import Item
@@ -18,6 +21,7 @@ from services.credibility_service import credibility_service
 # Import API routers
 from api.disaster_routes import router as disaster_router
 from api.telegram_routes import router as telegram_router
+from api.openai_routes import router as openai_router
 
 # --- setup & CORS ---
 app = FastAPI(
@@ -27,6 +31,12 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+# Global error handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled error: {exc}")
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 # Initialize database on startup
 @app.on_event("startup")
@@ -61,6 +71,7 @@ app.add_middleware(
 # Include API routers
 app.include_router(disaster_router)
 app.include_router(telegram_router)
+app.include_router(openai_router)
 
 # static uploads
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
