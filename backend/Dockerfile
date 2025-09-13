@@ -27,6 +27,7 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --upgrade openai python-dotenv && \
     python -m spacy download en_core_web_sm && \
     python -m spacy download xx_ent_wiki_sm && \
     python -c "import nltk; nltk.download('punkt')"
