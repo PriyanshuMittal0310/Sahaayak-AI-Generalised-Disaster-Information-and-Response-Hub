@@ -463,7 +463,7 @@ export default function App() {
         gap: '10px',
         zIndex: 1001
       }}>
-        <h1 style={{ margin: 0, fontSize: '1.5rem', whiteSpace: 'nowrap' }}>🌍 Disaster Response Map</h1>
+        <h1 style={{ margin: 0, fontSize: '1.5rem', whiteSpace: 'nowrap' }}>🌍 SAHAAYAK AI</h1>
         <div style={{ 
           display: 'flex', 
           gap: '10px',
