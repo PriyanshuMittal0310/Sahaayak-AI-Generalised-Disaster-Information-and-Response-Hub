@@ -1,81 +1,73 @@
-# 🌍 Sahaayak AI: Generalised Disaster Information and Response Hub
+# 🌍 Sahaayak AI: Disaster Information and Response Hub
 
-A comprehensive real-time disaster monitoring platform with a React frontend and FastAPI backend that visualizes disaster data from multiple sources including USGS, citizen reports, and social media feeds. The application provides an interactive map with real-time disaster updates, intelligent disaster classification, and location-based incident reporting.
-
-## 📌 Latest Updates
-
-- **Enhanced Language Processing**: Improved disaster detection with multi-language support
-- **Streamlined API**: Simplified endpoints for better integration
-- **Robust Error Handling**: Better error messages and validation
-- **Performance Optimizations**: Faster response times and reduced resource usage
-- **Simplified Deployment**: Easier setup with Docker Compose
+A real-time disaster monitoring platform with a React frontend and FastAPI backend that aggregates and visualizes disaster data from multiple sources including USGS, RSS feeds, and citizen reports.
 
 ## 🎯 Project Goals
 
 1. **Real-time Disaster Monitoring**: Aggregate and analyze disaster data from multiple sources
-2. **Citizen Engagement**: Enable public reporting of disaster incidents
+2. **Automated Analysis**: Use AI to classify and prioritize disaster reports
 3. **Data Visualization**: Provide intuitive visualizations of disaster data
-4. **Automated Analysis**: Use AI to classify and prioritize disaster reports
-5. **Open Source**: Community-driven development for global impact
+4. **Citizen Engagement**: Enable public reporting of disaster incidents
 
 ## 🌟 Features
 
 ### Backend (FastAPI)
-- 🌍 **Real-time disaster data** from multiple sources (USGS, GDACS, ReliefWeb, RSS feeds)
-- 🗄️ **PostgreSQL with PostGIS** for spatial data processing and storage
+- 🌍 **Multi-source Data Ingestion**: USGS, RSS feeds, and manual reports
+- 🗄️ **PostgreSQL with PostGIS** for spatial data processing
 - 🔄 **Alembic** for database migrations
-- 🤖 **AI-Powered NLP Processing** with language detection and disaster type classification
-- 📍 **Intelligent Geocoding** with automatic location extraction and coordinate mapping
-- 📊 **Comprehensive data** including location, magnitude, severity, and time
-- 🏥 **Health monitoring** with built-in health check endpoint
-- 🐳 **Docker support** for easy deployment
-- ⚡ **Redis caching** for improved performance
+- 🤖 **NLP Processing** with disaster type classification
+- 📍 **Geocoding** with location extraction and coordinate mapping
+- ⚡ **Scheduled Tasks** for periodic data updates
+- 🐳 **Docker support** for containerized deployment
 
 ### Frontend (React)
-- 🗺️ **Interactive map** using React Leaflet with real-time updates
+- 🗺️ **Interactive map** with real-time updates
 - 📱 **Responsive design** for all device sizes
-- ⚡ **Real-time updates** every minute
-- 📍 **Color-coded markers** for different data sources and disaster types
-- 📝 **Incident reporting** with photo uploads and GPS location
-- 🔄 **Manual refresh** capability
-- 💬 **Rich popups** with detailed disaster information
-- 🔍 **Advanced filtering** by disaster type, date, and severity
-- 🕒 **Auto-refreshing** data without page reload
-- 🌐 **Responsive layout** for all screen sizes
-- 🎯 **Smart disaster classification** with visual indicators
+- 📍 **Color-coded markers** for different disaster types
+- 📝 **Incident reporting** with location data
+- 🔍 **Filtering** by disaster type and date
 
-### AI & NLP Features
-- 🔤 **Language Detection** - Supports 55+ languages using langdetect
-- 🏷️ **Disaster Type Classification** - Rule-based + LLM-powered classification
-- 📍 **Named Entity Recognition** - Location extraction using spaCy + OpenAI fallback
-- 🗺️ **Intelligent Geocoding** - OpenStreetMap Nominatim integration with rate limiting
-- 📊 **PostGIS Integration** - Spatial queries and geometry processing
+### AI & Data Processing
+- 🔤 **Language Detection** for multi-language support
+- 🏷️ **Disaster Type Classification** using rule-based methods
+- 📍 **Location Extraction** from text reports
+- 🗺️ **Geocoding** with OpenStreetMap Nominatim
 
-## 🏗 System Architecture
+## 🏗 Project Structure
 
-### Backend Architecture
+### Backend
 ```
-├── backend/
-│   ├── api/                  # API endpoints and routes
-│   ├── migrations/           # Database migrations
-│   ├── models/              # Database models
-│   ├── services/            # Core business logic
-│   │   ├── nlp_service.py   # NLP processing
-│   │   ├── geocoding_service.py  # Location services
-│   │   └── credibility_service.py # Credibility scoring
-│   ├── main.py             # FastAPI application entry
-│   └── requirements.txt    # Python dependencies
+backend/
+├── api/                  # API endpoints and routes
+│   ├── __init__.py
+│   ├── disaster_routes.py
+│   └── openai_routes.py
+├── migrations/           # Database migrations
+├── seeds/               # Sample data and fixtures
+│   ├── demo_seed.py
+│   ├── reddit_seed.json
+│   └── x_seed.json
+├── services/            # Core business logic
+│   ├── __init__.py
+│   ├── credibility_service.py
+│   ├── event_service.py
+│   └── nlp_service.py
+├── main.py             # FastAPI application entry
+├── requirements.txt    # Python dependencies
+└── Dockerfile         # Container configuration
 ```
 
-### Frontend Architecture
+### Frontend
 ```
-├── frontend/
-│   ├── public/            # Static files
-│   └── src/
-│       ├── components/    # Reusable UI components
-│       ├── pages/         # Page components
-│       ├── services/      # API service layer
-│       └── App.jsx        # Main application component
+frontend/
+├── public/            # Static files
+│   └── index.html
+├── src/               # React application
+│   ├── AdminDeleteIncident.jsx
+│   ├── app.jsx
+│   └── index.js
+├── package.json
+└── Dockerfile
 ```
 
 ## 🌐 API Endpoints
@@ -111,71 +103,65 @@ A comprehensive real-time disaster monitoring platform with a React frontend and
 - Node.js 16+ (for frontend development)
 - Python 3.9+ (for backend development)
 
-### Using Docker (Recommended)
+### Using Docker Compose
 
-1. **Clone and navigate to the project**
+1. **Clone the repository**
    ```bash
    git clone https://github.com/PriyanshuMittal0310/Sahaayak-AI-Generalised-Disaster-Information-and-Response-Hub.git
    cd Sahaayak-AI-Generalised-Disaster-Information-and-Response-Hub
    ```
 
-2. **Start all services**
+2. **Set up environment variables**
+   Copy the example environment file and update as needed:
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Start the application**
    ```bash
    docker-compose up -d --build
    ```
 
-3. **Initialize the database**
+4. **Apply database migrations**
    ```bash
-   # Apply database migrations
-   docker-compose exec sahaayak-backend alembic upgrade head
-   
-   # Verify the database state
-   docker-compose exec sahaayak-backend alembic current
+   docker-compose exec backend alembic upgrade head
    ```
-   You should see output indicating the latest migration is applied.
 
-4. **Access the application**
+5. **Access the application**
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:8000
    - API Documentation: http://localhost:8000/docs
-   - Health check: http://localhost:8000/health
 
-## 🛠 Development Setup
+## 🛠 Development
 
-### Backend Development
+### Backend Setup
 
-1. **Set up Python environment**
+1. **Create and activate virtual environment**
    ```bash
    cd backend
    python -m venv venv
-   # On Windows: .\venv\Scripts\activate
-   # On Unix/Mac: source venv/bin/activate
+   # Windows: .\venv\Scripts\activate
+   # Unix/Mac: source venv/bin/activate
    pip install -r requirements.txt
    ```
 
-2. **Set up environment variables**
-   Create a `.env` file in the backend directory:
-   ```env
-   DATABASE_URL=postgresql://dev:dev@localhost:5432/crisis
-   REDIS_URL=redis://localhost:6379/0
-   OPENAI_API_KEY=your-api-key-here  # Optional for enhanced features
-   ```
-
-3. **Database setup**
+2. **Configure environment**
+   Copy and update the environment file:
    ```bash
-   # Run migrations
-   alembic upgrade head
-   
-   # Seed initial data
-   python -m seeds.seed_initial_data
+   cp .env.example .env  # Update with your configuration
    ```
 
-4. **Run the development server**
+3. **Run database migrations**
+   ```bash
+   alembic upgrade head
+   ```
+
+4. **Start the development server**
    ```bash
    uvicorn main:app --reload
    ```
 
-### Frontend Development
+### Frontend Setup
 
 1. **Install dependencies**
    ```bash
@@ -183,13 +169,7 @@ A comprehensive real-time disaster monitoring platform with a React frontend and
    npm install
    ```
 
-2. **Configure environment**
-   Create a `.env` file in the frontend directory:
-   ```env
-   REACT_APP_API_URL=http://localhost:8000
-   ```
-
-3. **Start the development server**
+2. **Start the development server**
    ```bash
    npm start
    ```
@@ -197,8 +177,9 @@ A comprehensive real-time disaster monitoring platform with a React frontend and
 ## 🧪 Testing
 
 ### Backend Tests
+Run the test suite using pytest:
 ```bash
-# Run all tests
+cd backend
 pytest
 
 # Run specific test file
@@ -206,8 +187,17 @@ pytest tests/test_nlp.py -v
 ```
 
 ### Frontend Tests
+Run the frontend test suite:
 ```bash
-# Run unit tests
+cd frontend
+npm test
+```
+
+## 📝 License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🤝 Contributing
+Contributions are welcome! Please feel free to submit a Pull Request.
 npm test
 
 # Run end-to-end tests
